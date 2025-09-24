@@ -32,7 +32,8 @@ import os
 import datetime
 from folium import Map, LayerControl
 from shapely.geometry import Polygon
-
+from xml.etree import ElementTree as ET
+from pathlib import Path
 
 class BiomassProductL1VFRA:
      def __init__(self, eof_path):
@@ -183,6 +184,8 @@ class BiomassProductSCS:
         print('__init__')
         self.path = Path(path)
         
+        self.mph = next(self.path.glob("bio*.xml"), None)
+        
         #search directory
         self.measurement_dir = self.path / "measurement" 
         self.annotation_dir = self.path / "annotation"
@@ -221,8 +224,108 @@ class BiomassProductSCS:
                 
         self.load_lut_variables()
         self.extract_footprint()
+        self.load_mph()
 
-
+    def load_mph(self):
+       """
+       Parse the MPH XML (root of the product) and extract:
+         - Acquisition parameters (eop:acquisitionParameters/bio:Acquisition)
+         - Processing information (eop:processing/bio:ProcessingInformation)
+    
+       The extracted values are stored as class attributes (self.*).
+       """
+       
+    
+       # Locate the main XML file if not already stored
+       if  self.mph is None:          
+           self.mph = next(Path(self.path).glob("*.xml"), None)
+    
+       if self.mph is None:
+           raise FileNotFoundError("MPH XML not found in product root.")
+    
+       # XML namespaces
+       ns = {
+           "bio": "http://earth.esa.int/biomass/1.0",
+           "eop": "http://www.opengis.net/eop/2.1",
+           "gml": "http://www.opengis.net/gml/3.2",
+           "om":  "http://www.opengis.net/om/2.0",
+           "ows": "http://www.opengis.net/ows/2.0",
+           "sar": "http://www.opengis.net/sar/2.1",
+           "xlink": "http://www.w3.org/1999/xlink",
+           "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+       }
+    
+       # Helper to safely extract text and cast values
+       def _get_text(root, xpath, cast=str):
+           el = root.find(xpath, ns)
+           if el is None or el.text is None:
+               return None
+           txt = el.text.strip()
+           if cast is bool:
+               return txt.lower() == "true"
+           if cast is int:
+               try: return int(txt)
+               except ValueError: return None
+           if cast is float:
+               try: return float(txt)
+               except ValueError: return None
+           return txt
+    
+       # Parse the XML tree
+       tree = ET.parse(self.mph)
+       root = tree.getroot()
+    
+       # =========================
+       # Acquisition parameters
+       # =========================
+       base = ".//eop:acquisitionParameters/bio:Acquisition"
+    
+       self.orbitNumber       = _get_text(root, f"{base}/eop:orbitNumber", int)
+       self.lastOrbitNumber   = _get_text(root, f"{base}/eop:lastOrbitNumber", int)
+       self.orbitDirection    = _get_text(root, f"{base}/eop:orbitDirection", str)
+    
+       self.wrsLongitudeGrid  = _get_text(root, f"{base}/eop:wrsLongitudeGrid", int)
+       self.wrsLatitudeGrid   = _get_text(root, f"{base}/eop:wrsLatitudeGrid", int)
+    
+       self.ascendingNodeDate = _get_text(root, f"{base}/eop:ascendingNodeDate", str)
+       self.startTimeFromAscendingNode      = _get_text(root, f"{base}/eop:startTimeFromAscendingNode", int)
+       self.completionTimeFromAscendingNode = _get_text(root, f"{base}/eop:completionTimeFromAscendingNode", int)
+    
+       self.polarisationMode      = _get_text(root, f"{base}/sar:polarisationMode", str)
+       pol_channels               = _get_text(root, f"{base}/sar:polarisationChannels", str)
+       self.polarisationChannels  = [p.strip() for p in pol_channels.split(",")] if pol_channels else None
+       self.antennaLookDirection  = _get_text(root, f"{base}/sar:antennaLookDirection", str)
+    
+       self.missionPhase     = _get_text(root, f"{base}/bio:missionPhase", str)
+       self.instrumentConfID = _get_text(root, f"{base}/bio:instrumentConfID", int)
+       self.dataTakeID       = _get_text(root, f"{base}/bio:dataTakeID", int)
+       self.orbitDriftFlag   = _get_text(root, f"{base}/bio:orbitDriftFlag", bool)
+       self.globalCoverageID = _get_text(root, f"{base}/bio:globalCoverageID", str)
+       self.majorCycleID     = _get_text(root, f"{base}/bio:majorCycleID", str)
+       self.repeatCycleID    = _get_text(root, f"{base}/bio:repeatCycleID", str)
+    
+       # =========================
+       # Processing information
+       # =========================
+       pbase = ".//eop:processing/bio:ProcessingInformation"
+    
+       self.processingCenter   = _get_text(root, f"{pbase}/eop:processingCenter", str)
+       self.processingDate     = _get_text(root, f"{pbase}/eop:processingDate", str)  # ISO 8601 string
+       self.processorName      = _get_text(root, f"{pbase}/eop:processorName", str)
+       self.processorVersion   = _get_text(root, f"{pbase}/eop:processorVersion", str)
+       self.processingLevel    = _get_text(root, f"{pbase}/eop:processingLevel", str)
+       self.processingMode     = _get_text(root, f"{pbase}/eop:processingMode", str)
+    
+       # Repeated fields: collect as lists
+       self.auxiliaryDataSetFiles = [
+           e.text.strip() for e in root.findall(f"{pbase}/eop:auxiliaryDataSetFileName", ns)
+           if e is not None and e.text
+       ]
+       self.sourceProducts = [
+           e.text.strip() for e in root.findall(f"{pbase}/bio:sourceProduct", ns)
+           if e is not None and e.text
+       ]
+            
 
     def extract_footprint(self):
         """
@@ -296,6 +399,7 @@ class BiomassProductSCS:
                 ds_group = xr.open_dataset(self.annotation_lut_file, group=group)
                 for var in ds_group.variables:
                     attr_name = f"{group}_{var}"
+                    print(attr_name)
                     setattr(self, attr_name, ds_group[var])
             except Exception as e:
                 print(f"Could not load variables from group '{group}': {e}")
@@ -532,6 +636,7 @@ class BiomassProductDGM:
     def __init__(self, path):
         print('__init__')
         self.path = Path(path)
+        self.mph = next(self.path.glob("bio*dgm*.xml"), None)
         
         #search directory
         self.measurement_dir = self.path / "measurement" 
@@ -566,6 +671,108 @@ class BiomassProductDGM:
 
                 
         self.load_lut_variables()
+        self.load_mph()
+        
+    
+    def load_mph(self):
+        """
+        Parse the MPH XML (root of the product) and extract:
+          - Acquisition parameters (eop:acquisitionParameters/bio:Acquisition)
+          - Processing information (eop:processing/bio:ProcessingInformation)
+     
+        The extracted values are stored as class attributes (self.*).
+        """
+        
+     
+        # Locate the main XML file if not already stored
+        if  self.mph is None:          
+            self.mph = next(Path(self.path).glob("*.xml"), None)
+     
+        if self.mph is None:
+            raise FileNotFoundError("MPH XML not found in product root.")
+     
+        # XML namespaces
+        ns = {
+            "bio": "http://earth.esa.int/biomass/1.0",
+            "eop": "http://www.opengis.net/eop/2.1",
+            "gml": "http://www.opengis.net/gml/3.2",
+            "om":  "http://www.opengis.net/om/2.0",
+            "ows": "http://www.opengis.net/ows/2.0",
+            "sar": "http://www.opengis.net/sar/2.1",
+            "xlink": "http://www.w3.org/1999/xlink",
+            "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        }
+     
+        # Helper to safely extract text and cast values
+        def _get_text(root, xpath, cast=str):
+            el = root.find(xpath, ns)
+            if el is None or el.text is None:
+                return None
+            txt = el.text.strip()
+            if cast is bool:
+                return txt.lower() == "true"
+            if cast is int:
+                try: return int(txt)
+                except ValueError: return None
+            if cast is float:
+                try: return float(txt)
+                except ValueError: return None
+            return txt
+     
+        # Parse the XML tree
+        tree = ET.parse(self.mph)
+        root = tree.getroot()
+     
+        # =========================
+        # Acquisition parameters
+        # =========================
+        base = ".//eop:acquisitionParameters/bio:Acquisition"
+     
+        self.orbitNumber       = _get_text(root, f"{base}/eop:orbitNumber", int)
+        self.lastOrbitNumber   = _get_text(root, f"{base}/eop:lastOrbitNumber", int)
+        self.orbitDirection    = _get_text(root, f"{base}/eop:orbitDirection", str)
+     
+        self.wrsLongitudeGrid  = _get_text(root, f"{base}/eop:wrsLongitudeGrid", int)
+        self.wrsLatitudeGrid   = _get_text(root, f"{base}/eop:wrsLatitudeGrid", int)
+     
+        self.ascendingNodeDate = _get_text(root, f"{base}/eop:ascendingNodeDate", str)
+        self.startTimeFromAscendingNode      = _get_text(root, f"{base}/eop:startTimeFromAscendingNode", int)
+        self.completionTimeFromAscendingNode = _get_text(root, f"{base}/eop:completionTimeFromAscendingNode", int)
+     
+        self.polarisationMode      = _get_text(root, f"{base}/sar:polarisationMode", str)
+        pol_channels               = _get_text(root, f"{base}/sar:polarisationChannels", str)
+        self.polarisationChannels  = [p.strip() for p in pol_channels.split(",")] if pol_channels else None
+        self.antennaLookDirection  = _get_text(root, f"{base}/sar:antennaLookDirection", str)
+     
+        self.missionPhase     = _get_text(root, f"{base}/bio:missionPhase", str)
+        self.instrumentConfID = _get_text(root, f"{base}/bio:instrumentConfID", int)
+        self.dataTakeID       = _get_text(root, f"{base}/bio:dataTakeID", int)
+        self.orbitDriftFlag   = _get_text(root, f"{base}/bio:orbitDriftFlag", bool)
+        self.globalCoverageID = _get_text(root, f"{base}/bio:globalCoverageID", str)
+        self.majorCycleID     = _get_text(root, f"{base}/bio:majorCycleID", str)
+        self.repeatCycleID    = _get_text(root, f"{base}/bio:repeatCycleID", str)
+     
+        # =========================
+        # Processing information
+        # =========================
+        pbase = ".//eop:processing/bio:ProcessingInformation"
+     
+        self.processingCenter   = _get_text(root, f"{pbase}/eop:processingCenter", str)
+        self.processingDate     = _get_text(root, f"{pbase}/eop:processingDate", str)  # ISO 8601 string
+        self.processorName      = _get_text(root, f"{pbase}/eop:processorName", str)
+        self.processorVersion   = _get_text(root, f"{pbase}/eop:processorVersion", str)
+        self.processingLevel    = _get_text(root, f"{pbase}/eop:processingLevel", str)
+        self.processingMode     = _get_text(root, f"{pbase}/eop:processingMode", str)
+     
+        # Repeated fields: collect as lists
+        self.auxiliaryDataSetFiles = [
+            e.text.strip() for e in root.findall(f"{pbase}/eop:auxiliaryDataSetFileName", ns)
+            if e is not None and e.text
+        ]
+        self.sourceProducts = [
+            e.text.strip() for e in root.findall(f"{pbase}/bio:sourceProduct", ns)
+            if e is not None and e.text
+        ]
 
     def load_lut_variables(self):
         """
@@ -602,6 +809,79 @@ class BiomassProductDGM:
                 print(f"Could not load variables from group '{group}': {e}")
     
         print("All LUT variables and global attributes loaded as attributes.")  
+        
+        
+        
+    def plot_lut_variable(self, variable_name, save_geotiff=False):
+            """
+            Plot a variable from the LUT file and optionally save it as a GeoTIFF.
+            Searches across all known groups.
+            """
+            if not self.annotation_lut_file:
+                raise FileNotFoundError("LUT NetCDF file not found.")
+        
+            groups = ["ionosphereCorrection","denoising", "geometry", "radiometry"]
+        
+            var = None
+            found_group = None
+        
+            for group in groups:
+                try:
+                    ds_group = xr.open_dataset(self.annotation_lut_file, group=group)
+                    if variable_name in ds_group:
+                        var = ds_group[variable_name]
+                        found_group = group
+                        break
+                except Exception:
+                    continue
+        
+            if var is None:
+                raise KeyError(f"Variable '{variable_name}' not found in any known group.")
+        
+            data = var.values
+            # Maschera i valori nodata
+            data = np.ma.masked_equal(data, -9999)
+            
+            plt.figure(figsize=(8, 6))
+            plt.imshow(data, cmap="RdYlBu")
+            plt.colorbar(label=f"{found_group}/{variable_name}")
+            plt.title(f"{variable_name} from group '{found_group}'")
+            plt.tight_layout()
+            plt.show()
+        
+            if save_geotiff:
+                try:
+                    lat_ds = xr.open_dataset(self.annotation_lut_file, group="geometry")
+                    lats = lat_ds["latitude"].values
+                    lons = lat_ds["longitude"].values
+        
+                    transform = from_origin(
+                        np.min(lons),
+                        np.max(lats),
+                        abs(lons[0, 1] - lons[0, 0]),
+                        abs(lats[1, 0] - lats[0, 0])
+                    )
+        
+                    with rasterio.open(
+                        f"{variable_name.replace('/', '_')}.tif",
+                        'w',
+                        driver='GTiff',
+                        height=data.shape[0],
+                        width=data.shape[1],
+                        count=1,
+                        dtype=data.dtype,
+                        crs='EPSG:4326',
+                        transform=transform
+                    ) as dst:
+                        dst.write(data, 1)
+        
+                    print(f"✅ Saved {variable_name} as GeoTIFF.")
+                except Exception as e:
+                    print(f"⚠️ Failed to save GeoTIFF: {e}")    
+    
+    
+    
+    
 
     def export_abs_bands_separately(self, output_dir):
         """
@@ -681,6 +961,55 @@ class BiomassProductDGM:
         
 
 
+    def load_polarizations(self):
+        """
+        Carica i dati complessi polarimetrici (HH, HV, VH, VV) da file abs e phase.
+        Salva:
+        - self.S: dati complessi
+        - self.A: ampiezze
+        - self.P: fasi
+        - self.profile, self.crs, self.transform, self.gcps, self.gcp_crs
+          per permettere un corretto salvataggio geolocalizzato (GeoTIFF con GCP).
+        """
+        import rasterio
+        import numpy as np
+        from rasterio.control import GroundControlPoint
+    
+        polarizations = ['HH', 'HV', 'VH', 'VV']
+        self.A = {}
+
+    
+        if not self.measurement_abs_file :
+            raise FileNotFoundError("Missing abs or phase file in measurement directory.")
+    
+        # === Leggi il file delle ampiezze ===
+        with rasterio.open(self.measurement_abs_file) as abs_src:
+            abs_data = abs_src.read()  # shape (4, rows, cols)
+            self.profile = abs_src.profile
+            self.crs = abs_src.crs
+            self.transform = abs_src.transform
+            self.driver = abs_src.driver
+    
+            # Leggi e correggi i GCP
+            raw_gcps, gcp_crs = abs_src.gcps
+            self.gcps = [
+                GroundControlPoint(row=g.row, col=g.col, x=g.x, y=g.y, z=g.z)
+                for g in raw_gcps
+            ]
+            self.gcp_crs = gcp_crs
+    
+    
+        # === Ricostruisci dati complessi ===
+        for i, pol in enumerate(polarizations):
+            amp = abs_data[i, :, :]
+
+            self.A[pol] = amp
+
+    
+        print("✔️ Complex polarizations loaded: HH, HV, VH, VV.")
+        print(f"🗺  CRS: {self.crs}, GCPs: {len(self.gcps)} trovati.")
+
+
 
 class STAProductGroupLoader:
     def __init__(self, folder_TDS):
@@ -756,6 +1085,7 @@ class BiomassProductSTA:
     def __init__(self, path):
         self.path = Path(path)
         print (self.path)
+        self.mph = next(self.path.glob("bio*sta*.xml"), None)
         #search directory
         self.measurement_dir = self.path / "measurement" 
         self.annotation_coregistered_dir = self.path / "annotation_coregistered"
@@ -787,6 +1117,110 @@ class BiomassProductSTA:
         self.load_lut_variables()        
         self.is_primary = self.check_if_primary()
         self.noDataValue=self.get_nodata_value()
+        
+        self.load_mph()
+        
+    
+    def load_mph(self):
+        """
+        Parse the MPH XML (root of the product) and extract:
+          - Acquisition parameters (eop:acquisitionParameters/bio:Acquisition)
+          - Processing information (eop:processing/bio:ProcessingInformation)
+     
+        The extracted values are stored as class attributes (self.*).
+        """
+        
+     
+        # Locate the main XML file if not already stored
+        if  self.mph is None:          
+            self.mph = next(Path(self.path).glob("*.xml"), None)
+     
+        if self.mph is None:
+            raise FileNotFoundError("MPH XML not found in product root.")
+     
+        # XML namespaces
+        ns = {
+            "bio": "http://earth.esa.int/biomass/1.0",
+            "eop": "http://www.opengis.net/eop/2.1",
+            "gml": "http://www.opengis.net/gml/3.2",
+            "om":  "http://www.opengis.net/om/2.0",
+            "ows": "http://www.opengis.net/ows/2.0",
+            "sar": "http://www.opengis.net/sar/2.1",
+            "xlink": "http://www.w3.org/1999/xlink",
+            "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        }
+     
+        # Helper to safely extract text and cast values
+        def _get_text(root, xpath, cast=str):
+            el = root.find(xpath, ns)
+            if el is None or el.text is None:
+                return None
+            txt = el.text.strip()
+            if cast is bool:
+                return txt.lower() == "true"
+            if cast is int:
+                try: return int(txt)
+                except ValueError: return None
+            if cast is float:
+                try: return float(txt)
+                except ValueError: return None
+            return txt
+     
+        # Parse the XML tree
+        tree = ET.parse(self.mph)
+        root = tree.getroot()
+     
+        # =========================
+        # Acquisition parameters
+        # =========================
+        base = ".//eop:acquisitionParameters/bio:Acquisition"
+     
+        self.orbitNumber       = _get_text(root, f"{base}/eop:orbitNumber", int)
+        self.lastOrbitNumber   = _get_text(root, f"{base}/eop:lastOrbitNumber", int)
+        self.orbitDirection    = _get_text(root, f"{base}/eop:orbitDirection", str)
+     
+        self.wrsLongitudeGrid  = _get_text(root, f"{base}/eop:wrsLongitudeGrid", int)
+        self.wrsLatitudeGrid   = _get_text(root, f"{base}/eop:wrsLatitudeGrid", int)
+     
+        self.ascendingNodeDate = _get_text(root, f"{base}/eop:ascendingNodeDate", str)
+        self.startTimeFromAscendingNode      = _get_text(root, f"{base}/eop:startTimeFromAscendingNode", int)
+        self.completionTimeFromAscendingNode = _get_text(root, f"{base}/eop:completionTimeFromAscendingNode", int)
+     
+        self.polarisationMode      = _get_text(root, f"{base}/sar:polarisationMode", str)
+        pol_channels               = _get_text(root, f"{base}/sar:polarisationChannels", str)
+        self.polarisationChannels  = [p.strip() for p in pol_channels.split(",")] if pol_channels else None
+        self.antennaLookDirection  = _get_text(root, f"{base}/sar:antennaLookDirection", str)
+     
+        self.missionPhase     = _get_text(root, f"{base}/bio:missionPhase", str)
+        self.instrumentConfID = _get_text(root, f"{base}/bio:instrumentConfID", int)
+        self.dataTakeID       = _get_text(root, f"{base}/bio:dataTakeID", int)
+        self.orbitDriftFlag   = _get_text(root, f"{base}/bio:orbitDriftFlag", bool)
+        self.globalCoverageID = _get_text(root, f"{base}/bio:globalCoverageID", str)
+        self.majorCycleID     = _get_text(root, f"{base}/bio:majorCycleID", str)
+        self.repeatCycleID    = _get_text(root, f"{base}/bio:repeatCycleID", str)
+     
+        # =========================
+        # Processing information
+        # =========================
+        pbase = ".//eop:processing/bio:ProcessingInformation"
+     
+        self.processingCenter   = _get_text(root, f"{pbase}/eop:processingCenter", str)
+        self.processingDate     = _get_text(root, f"{pbase}/eop:processingDate", str)  # ISO 8601 string
+        self.processorName      = _get_text(root, f"{pbase}/eop:processorName", str)
+        self.processorVersion   = _get_text(root, f"{pbase}/eop:processorVersion", str)
+        self.processingLevel    = _get_text(root, f"{pbase}/eop:processingLevel", str)
+        self.processingMode     = _get_text(root, f"{pbase}/eop:processingMode", str)
+     
+        # Repeated fields: collect as lists
+        self.auxiliaryDataSetFiles = [
+            e.text.strip() for e in root.findall(f"{pbase}/eop:auxiliaryDataSetFileName", ns)
+            if e is not None and e.text
+        ]
+        self.sourceProducts = [
+            e.text.strip() for e in root.findall(f"{pbase}/bio:sourceProduct", ns)
+            if e is not None and e.text
+        ]        
+        
     
     def check_if_primary(self):
 
@@ -1239,14 +1673,206 @@ class BiomassProductSTA:
             print(f"❌ Error parsing KMz file: {e}")
         
 
+
+
+class L2AProductPaths:
+    def __init__(self, base_folder):
+        self.base_folder = Path(base_folder)
+
+    def get_path(self, prefix):
+        """Trova il path del prodotto L2A in base al prefisso (FH, FD, GN)."""
+        matches = list(self.base_folder.glob(f"BIO_FP_{prefix}__L2A_*"))
+        if not matches:
+            raise FileNotFoundError(f"No L2A product found for {prefix} in {self.base_folder}")
+        return matches[0]  # se ce n'è uno solo, restituisci quello
+        
+
+
+    @property
+    def fh(self):
+        
+        return self.get_path("FH")
+
+    @property
+    def fd(self):
+        
+        return self.get_path("FD")
+
+    @property
+    def gn(self):
+        
+        return self.get_path("GN")
+    
+    
+
+class L2BProductPaths:
+    def __init__(self, base_folder):
+        self.base_folder = Path(base_folder)
+
+    def get_path(self, prefix):
+        """Trova il path del prodotto L2A in base al prefisso (FH, FD, GN)."""
+        matches = list(self.base_folder.glob(f"BIO_FP_{prefix}_L2B_*"))
+        if not matches:
+            raise FileNotFoundError(f"No L2B product found for {prefix} in {self.base_folder}")
+        return matches[0]  # se ce n'è uno solo, restituisci quello
+
+    @property
+    def fh(self):
+        return self.get_path("FH_")
+
+    @property
+    def fd(self):
+        return self.get_path("FD_")
+
+    @property
+    def agb(self):
+        return self.get_path("AGB")
+
+
+
 class BiomassProductL2:
     def __init__(self, path):
         self.path = Path(path)
+        self.mph = next(self.path.glob("bio*.xml"), None)
         self.measurement_dir = self.path / "measurement"
         self.annotation_dir = self.path / "annotation"
         self.preview_dir = self.path / "preview"
         self.schema_dir = self.path / "schema" 
         
+        # Default value for float NoData (will be filled after XML parsing)
+        self.floatNoDataValue = None
+
+        # Search for the main annotation XML file and parse it if available
+        xml_file = next(self.annotation_dir.glob("*.xml"), None)
+        if xml_file and xml_file.exists():
+            self._parse_annotation_xml(xml_file)
+        
+        self.load_mph()
+        
+    
+    def load_mph(self):
+        """
+        Parse the MPH XML (root of the product) and extract:
+          - Acquisition parameters (eop:acquisitionParameters/bio:Acquisition)
+          - Processing information (eop:processing/bio:ProcessingInformation)
+     
+        The extracted values are stored as class attributes (self.*).
+        """
+        
+     
+        # Locate the main XML file if not already stored
+        if  self.mph is None:          
+            self.mph = next(Path(self.path).glob("*.xml"), None)
+     
+        if self.mph is None:
+            raise FileNotFoundError("MPH XML not found in product root.")
+     
+        # XML namespaces
+        ns = {
+            "bio": "http://earth.esa.int/biomass/1.0",
+            "eop": "http://www.opengis.net/eop/2.1",
+            "gml": "http://www.opengis.net/gml/3.2",
+            "om":  "http://www.opengis.net/om/2.0",
+            "ows": "http://www.opengis.net/ows/2.0",
+            "sar": "http://www.opengis.net/sar/2.1",
+            "xlink": "http://www.w3.org/1999/xlink",
+            "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        }
+     
+        # Helper to safely extract text and cast values
+        def _get_text(root, xpath, cast=str):
+            el = root.find(xpath, ns)
+            if el is None or el.text is None:
+                return None
+            txt = el.text.strip()
+            if cast is bool:
+                return txt.lower() == "true"
+            if cast is int:
+                try: return int(txt)
+                except ValueError: return None
+            if cast is float:
+                try: return float(txt)
+                except ValueError: return None
+            return txt
+     
+        # Parse the XML tree
+        tree = ET.parse(self.mph)
+        root = tree.getroot()
+     
+        # =========================
+        # Acquisition parameters
+        # =========================
+        base = ".//eop:acquisitionParameters/bio:Acquisition"
+     
+        self.orbitNumber       = _get_text(root, f"{base}/eop:orbitNumber", int)
+        self.lastOrbitNumber   = _get_text(root, f"{base}/eop:lastOrbitNumber", int)
+        self.orbitDirection    = _get_text(root, f"{base}/eop:orbitDirection", str)
+     
+        self.wrsLongitudeGrid  = _get_text(root, f"{base}/eop:wrsLongitudeGrid", int)
+        self.wrsLatitudeGrid   = _get_text(root, f"{base}/eop:wrsLatitudeGrid", int)
+     
+        self.ascendingNodeDate = _get_text(root, f"{base}/eop:ascendingNodeDate", str)
+        self.startTimeFromAscendingNode      = _get_text(root, f"{base}/eop:startTimeFromAscendingNode", int)
+        self.completionTimeFromAscendingNode = _get_text(root, f"{base}/eop:completionTimeFromAscendingNode", int)
+     
+        self.polarisationMode      = _get_text(root, f"{base}/sar:polarisationMode", str)
+        pol_channels               = _get_text(root, f"{base}/sar:polarisationChannels", str)
+        self.polarisationChannels  = [p.strip() for p in pol_channels.split(",")] if pol_channels else None
+        self.antennaLookDirection  = _get_text(root, f"{base}/sar:antennaLookDirection", str)
+     
+        self.missionPhase     = _get_text(root, f"{base}/bio:missionPhase", str)
+        self.instrumentConfID = _get_text(root, f"{base}/bio:instrumentConfID", int)
+        self.dataTakeID       = _get_text(root, f"{base}/bio:dataTakeID", int)
+        self.orbitDriftFlag   = _get_text(root, f"{base}/bio:orbitDriftFlag", bool)
+        self.globalCoverageID = _get_text(root, f"{base}/bio:globalCoverageID", str)
+        self.majorCycleID     = _get_text(root, f"{base}/bio:majorCycleID", str)
+        self.repeatCycleID    = _get_text(root, f"{base}/bio:repeatCycleID", str)
+     
+        # =========================
+        # Processing information
+        # =========================
+        pbase = ".//eop:processing/bio:ProcessingInformation"
+     
+        self.processingCenter   = _get_text(root, f"{pbase}/eop:processingCenter", str)
+        self.processingDate     = _get_text(root, f"{pbase}/eop:processingDate", str)  # ISO 8601 string
+        self.processorName      = _get_text(root, f"{pbase}/eop:processorName", str)
+        self.processorVersion   = _get_text(root, f"{pbase}/eop:processorVersion", str)
+        self.processingLevel    = _get_text(root, f"{pbase}/eop:processingLevel", str)
+        self.processingMode     = _get_text(root, f"{pbase}/eop:processingMode", str)
+     
+        # Repeated fields: collect as lists
+        self.auxiliaryDataSetFiles = [
+            e.text.strip() for e in root.findall(f"{pbase}/eop:auxiliaryDataSetFileName", ns)
+            if e is not None and e.text
+        ]
+        self.sourceProducts = [
+            e.text.strip() for e in root.findall(f"{pbase}/bio:sourceProduct", ns)
+            if e is not None and e.text
+        ]
+    
+    def _parse_annotation_xml(self, xml_file):
+        """
+        Parse the main annotation XML file to extract relevant metadata.
+        
+        Parameters
+        ----------
+        xml_file : Path
+            Path to the annotation XML file.
+        """
+        try:
+            # Load and parse the XML file
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+    
+            # Find the <floatNoDataValue> tag in the XML and store its value
+            float_no_data_elem = root.find(".//floatNoDataValue")
+            if float_no_data_elem is not None:
+                self.floatNoDataValue = float(float_no_data_elem.text.strip())
+    
+        except Exception as e:
+            print(f"⚠️ Error while parsing XML {xml_file}: {e}")
+    
+    
     def parse_structure(self):
         print(f"Parsing base structure for product at {self.path}")
         print("- Measurement directory:", self.measurement_dir)
@@ -1299,6 +1925,8 @@ class l2a_fh(BiomassProductL2):
         #search file in  preview
         self.preview_ql_file = next(self.preview_dir.glob("*fh_ql.png"), None)
         self.preview_quality_file = next(self.preview_dir.glob("*fhquality_ql.png"), None)
+        
+        
 
     def parse_l2a_specific(self):
         print("Parsing L2A FH specific content...")
@@ -1306,6 +1934,8 @@ class l2a_fh(BiomassProductL2):
         print("- Quality Measurement File:", self.measurement_quality_file)
         print("- Annotation XML File:", self.annotation_xml_file)
         print("- Annotation LUT File:", self.annotation_lut_file)
+        
+        
  
     def check_structure(self):
         print("\n[Checking required directories]")
@@ -1367,7 +1997,7 @@ class l2a_fh(BiomassProductL2):
             except Exception as e:
                 print(f"❌ Failed to list LUT contents: {e}")
 
-    
+
             
     
 
@@ -1419,10 +2049,7 @@ class l2a_fh(BiomassProductL2):
             ).add_to(m)
             folium.LayerControl().add_to(m)
             return m
-        except Exception as e:
-            print(f"❌ Could not display FNF on map: {e}")
-        except Exception as e:
-            print(f"❌ Could not display FNF on map: {e}")
+
         except Exception as e:
             print(f"❌ Could not display FNF on map: {e}")
 
@@ -1562,6 +2189,10 @@ class l2a_fh(BiomassProductL2):
         else:
             print("⚠️ No valid TIFFs to display on map.")
             
+
+
+
+
 class l2a_fd(BiomassProductL2):
     def __init__(self, path):
         super().__init__(path)
@@ -1576,10 +2207,12 @@ class l2a_fd(BiomassProductL2):
             if "cfm" in file.name.lower():
                 self.measurement_cfm_file = file
                 
+            if "fd" in file.name.lower():
+                    self.measurement_file = file
+
+        
             if "probability" in file.name.lower():
                     self.measurement_probability_file = file
-            else:
-                self.measurement_file = file
         
         # Cerca i file di annotation
         self.annotation_xml_file = None
@@ -1589,6 +2222,38 @@ class l2a_fd(BiomassProductL2):
                 self.annotation_xml_file = file
             elif file.suffix == ".nc":
                 self.annotation_lut_file = file
+                                          
+         
+         
+        # Load LUT variables as self attributes
+        self.lut_variables = {}
+
+        if self.annotation_lut_file and self.annotation_lut_file.exists():
+             try:
+                 group_names = [None]
+                 try:
+                     import netCDF4
+                     root = netCDF4.Dataset(self.annotation_lut_file, mode='r')
+                     group_names.extend(list(root.groups.keys()))
+                     root.close()
+                 except Exception:
+                     pass
+
+                 for group in group_names:
+                     ds = xr.open_dataset(self.annotation_lut_file, group=group) if group else xr.open_dataset(self.annotation_lut_file)
+                     for var in ds.variables:
+                         attr_name = f"{group}_{var}" if group else var
+                         setattr(self, attr_name, ds[var])
+                         self.lut_variables[attr_name] = ds[var]
+             except Exception as e:
+                 print(f"⚠️ Failed to preload LUT variables: {e}")
+         
+                       
+        #search file in  preview
+        self.preview_ql_file = next(self.preview_dir.glob("*fd_ql.png"), None)
+        self.preview_quality_file = next(self.preview_dir.glob("*probability_ql.png"), None)               
+        self.preview_quality_file = next(self.preview_dir.glob("*cfm_ql.png"), None)                 
+                
 
     def parse_l2a_specific(self):
         print("Parsing L2A FD specific content...")
@@ -1597,7 +2262,211 @@ class l2a_fd(BiomassProductL2):
         print("- Probability Measurement File:", self.measurement_probability_file)
         
         print("- Annotation XML File:", self.annotation_xml_file)
-        print("- Annotation LUT File:", self.annotation_lut_file)     
+        print("- Annotation LUT File:", self.annotation_lut_file)    
+        
+        
+    def check_structure(self):
+        print("\n[Checking required directories]")
+        for d in [self.measurement_dir, self.annotation_dir, self.preview_dir, self.schema_dir]:
+            print(f"{'✔️' if d.exists() else '❌'} {d}")
+
+    def check_tiff_files(self):
+        print("\n[Checking TIFF files]")
+        for tiff_file in [self.measurement_file, self.measurement_cfm_file, self.measurement_probability_file]:
+            if tiff_file and tiff_file.exists():
+                try:
+                    with rasterio.open(tiff_file) as src:
+                        src.read(1)
+                    print(f"✔️ {tiff_file.name} is valid.")
+                except Exception as e:
+                    print(f"❌ {tiff_file.name} could not be read: {e}")
+            else:
+                print(f"❌ TIFF file missing: {tiff_file}")
+
+    def check_xml_validity(self):
+        print("\n[Checking XML file]")
+        if self.annotation_xml_file and self.annotation_xml_file.exists():
+            try:
+                ET.parse(self.annotation_xml_file)
+                print(f"✔️ {self.annotation_xml_file.name} is well-formed.")
+            except ET.ParseError as e:
+                print(f"❌ XML Parse Error: {e}")
+        else:
+            print("❌ XML file not found.")
+
+    def check_lut_contents(self):
+            print("[Listing available LUT contents]")
+            if not self.annotation_lut_file or not self.annotation_lut_file.exists():
+                print("❌ LUT NetCDF file not found.")
+                return
+    
+            try:
+                group_names = [None]
+                try:
+                    # Try opening with netcdf4 engine to access groups
+                    root = netCDF4.Dataset(self.annotation_lut_file, mode='r')
+                    group_names.extend(list(root.groups.keys()))
+                    root.close()
+                except Exception:
+                    pass
+    
+                for group in group_names:
+                    print(f" --- Group: {group or 'root'} ---")
+                    ds = xr.open_dataset(self.annotation_lut_file, group=group) if group else xr.open_dataset(self.annotation_lut_file)
+    
+                    for var in ds.variables:
+                        attr_name = f"{group}_{var}" if group else var
+                        print(f" - {attr_name}	 shape: {ds[var].shape}")
+    
+                    if ds.attrs:
+                        print("Global attributes:")
+                        for key, val in ds.attrs.items():
+                            print(f" - {key}: {val}")
+            except Exception as e:
+                print(f"❌ Failed to list LUT contents: {e}")
+
+
+            
+    
+
+    def plot_lut_variable(self, variable_name, save_geotiff=False):
+            """
+            Plot a variable from the LUT file and optionally save it as a GeoTIFF.
+            Searches across all known groups.
+            """
+            if not self.annotation_lut_file:
+                raise FileNotFoundError("LUT NetCDF file not found.")
+        
+            groups = ["FNF","ACM", "numberOfAverages"]
+        
+            var = None
+            found_group = None
+        
+            for group in groups:
+                try:
+                    ds_group = xr.open_dataset(self.annotation_lut_file, group=group)
+                    if variable_name in ds_group:
+                        var = ds_group[variable_name]
+                        found_group = group
+                        break
+                except Exception:
+                    continue
+        
+            if var is None:
+                raise KeyError(f"Variable '{variable_name}' not found in any known group.")
+        
+            data = var.values
+            # Maschera i valori nodata
+            data = np.ma.masked_equal(data, -9999)
+            
+            plt.figure(figsize=(8, 6))
+            plt.imshow(data, cmap="RdYlBu")
+            plt.colorbar(label=f"{found_group}/{variable_name}")
+            plt.title(f"{variable_name} from group '{found_group}'")
+            plt.tight_layout()
+            plt.show()
+        
+            if save_geotiff:
+                try:
+                    lat_ds = xr.open_dataset(self.annotation_lut_file, group="geometry")
+                    lats = lat_ds["latitude"].values
+                    lons = lat_ds["longitude"].values
+        
+                    transform = from_origin(
+                        np.min(lons),
+                        np.max(lats),
+                        abs(lons[0, 1] - lons[0, 0]),
+                        abs(lats[1, 0] - lats[0, 0])
+                    )
+        
+                    with rasterio.open(
+                        f"{variable_name.replace('/', '_')}.tif",
+                        'w',
+                        driver='GTiff',
+                        height=data.shape[0],
+                        width=data.shape[1],
+                        count=1,
+                        dtype=data.dtype,
+                        crs='EPSG:4326',
+                        transform=transform
+                    ) as dst:
+                        dst.write(data, 1)
+        
+                    print(f"✅ Saved {variable_name} as GeoTIFF.")
+                except Exception as e:
+                    print(f"⚠️ Failed to save GeoTIFF: {e}")  
+
+
+    def check_and_show_previews(self):
+        """
+        Check and display both quicklook PNGs: main and quality.
+        """
+        import matplotlib.pyplot as plt
+    
+        paths = {
+            "Main Preview": self.preview_ql_file,
+            "Quality Preview": self.preview_quality_file
+        }
+    
+        valid_files = {}
+    
+        # Check existence and loadability
+        for label, path in paths.items():
+            if not path or not path.exists():
+                print(f"❌ {label} not found.")
+                continue
+            try:
+                img = Image.open(path)
+                img.verify()  # check format, does not load
+                img = Image.open(path)  # reopen after verify
+                valid_files[label] = img
+                print(f"✔️ {label} loaded: {path.name}, size: {img.size}")
+            except Exception as e:
+                print(f"❌ Error loading {label}: {e}")
+    
+        # Show if at least one is valid
+        if valid_files:
+            fig, axs = plt.subplots(1, len(valid_files), figsize=(10, 5))
+            if len(valid_files) == 1:
+                axs = [axs]
+            for ax, (label, img) in zip(axs, valid_files.items()):
+                ax.imshow(img)
+                ax.set_title(label)
+                ax.axis('off')
+            plt.tight_layout()
+            plt.show()
+
+    def check_cog_integrity(self):
+        print("\n[COG Integrity Check]")
+        files = {
+            "Measurement": self.measurement_file,
+            "Quality": self.measurement_quality_file
+        }
+        for label, path in files.items():
+            if not path or not path.exists():
+                print(f"❌ {label} TIFF not found.")
+                continue
+            try:
+                with rasterio.open(path) as src:
+                    overviews = src.overviews(1)
+                    is_tiled = src.is_tiled
+                    compression = src.compression.name if src.compression else "None"
+                    print(f"✅ {label} TIFF: {path.name}")
+                    print(f"   - Size: {src.width} x {src.height}")
+                    print(f"   - Tiled: {'✔' if is_tiled else '✖'}")
+                    print(f"   - Overviews: {overviews if overviews else '✖ None'}")
+                    print(f"   - Compression: {compression}")
+                    print(f"   - CRS: {src.crs}")
+                    print(f"   - Nodata: {src.nodata}")
+            except Exception as e:
+                print(f"❌ Error with {label}: {e}")
+    
+    
+        
+        
+        
+        
+        
 
 class l2a_gn(BiomassProductL2):
     def __init__(self, path):
@@ -1619,6 +2488,36 @@ class l2a_gn(BiomassProductL2):
                 self.annotation_xml_file = file
             elif file.suffix == ".nc":
                 self.annotation_lut_file = file
+                
+        # Load LUT variables as self attributes
+        self.lut_variables = {}
+
+        if self.annotation_lut_file and self.annotation_lut_file.exists():
+             try:
+                 group_names = [None]
+                 try:
+                     import netCDF4
+                     root = netCDF4.Dataset(self.annotation_lut_file, mode='r')
+                     group_names.extend(list(root.groups.keys()))
+                     root.close()
+                 except Exception:
+                     pass
+
+                 for group in group_names:
+                     ds = xr.open_dataset(self.annotation_lut_file, group=group) if group else xr.open_dataset(self.annotation_lut_file)
+                     for var in ds.variables:
+                         attr_name = f"{group}_{var}" if group else var
+                         setattr(self, attr_name, ds[var])
+                         self.lut_variables[attr_name] = ds[var]
+             except Exception as e:
+                 print(f"⚠️ Failed to preload LUT variables: {e}")
+         
+                       
+        #search file in  preview
+        self.preview_ql_file = next(self.preview_dir.glob("*gn_ql.png"), None)
+               
+                
+        
 
     def parse_l2a_specific(self):
         print("Parsing L2A GN specific content...")
@@ -1627,6 +2526,9 @@ class l2a_gn(BiomassProductL2):
         
         print("- Annotation XML File:", self.annotation_xml_file)
         print("- Annotation LUT File:", self.annotation_lut_file)
+        
+        
+        
 
 class l2b_fh(BiomassProductL2):
     def __init__(self, path):
