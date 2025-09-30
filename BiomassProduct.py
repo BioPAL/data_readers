@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-(c) European Space Agency (ESA) Licensed under ESA Software Community Licence Permissive (Type 3) – v2.4
+Copyright 2025, European Space Agency (ESA)
+Licensed under ESA Software Community Licence Permissive (Type 3) - v2.4
 
 BiomassProduct.py
 ------------------

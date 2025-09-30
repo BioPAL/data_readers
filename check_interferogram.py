@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed May 28 21:11:09 2025
-
+Copyright 2025, European Space Agency (ESA)
+Licensed under ESA Software Community Licence Permissive (Type 3) - v2.4
 """
 
 import xml.etree.ElementTree as ET  #needed to fetch  the data from annotations
