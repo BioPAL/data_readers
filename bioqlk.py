@@ -673,7 +673,7 @@ def _warp_image(
         cmd.extend(["-tr", str(resolution), str(resolution)])
 
     # pass through extra option
-    if extra_opts is None:
+    if extra_opts is not None:
         # NOTE: no check is performed on extra options
         # TODO:
         #   * validate user provided extra options
