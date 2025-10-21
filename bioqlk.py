@@ -183,7 +183,7 @@ def _smooth_cpx(
     real_smoothed = ndimage.uniform_filter(data.real, size=winsize)
     imag_smoothed = ndimage.uniform_filter(data.imag, size=winsize)
     smoothed = real_smoothed + 1j * imag_smoothed
-    
+
     if decimate:
         if decimate is True:
             dy, dx = winsize
@@ -204,7 +204,7 @@ def fix_ical_phase(hh, hv, vh, vv, pc_hh, pc_hv, pc_vh, pc_vv=0.0):
     hv_out = hv * np.exp(1j * pc_hv)
     vh_out = vh * np.exp(1j * pc_vh)
     vv_out = vv * np.exp(1j * pc_vv)
-    
+
     return hh_out, hv_out, vh_out, vv_out
 
 
@@ -246,10 +246,10 @@ def pauli(
         green = green**2
         blue = blue**2
     elif scale == EScale.DB:
-        red = 20 * np.ma.log10(red) 
+        red = 20 * np.ma.log10(red)
         green = 20 * np.ma.log10(green)
-        blue = 20 * np.ma.log10(blue) 
-        
+        blue = 20 * np.ma.log10(blue)
+
     return red, green, blue
 
 
@@ -471,7 +471,6 @@ def mean_scaling(data, cscale_factor: float = DEFAULT_CSCALE):
     """
     low = 0
     high = cscale_factor * np.mean(data)
-
     return low, high
 
 
@@ -998,8 +997,6 @@ def make_rgb(
     vmax = scaling_ranges["blue_high"]
     _log.info("B: vmin=%f, vmax=%f", vmin, vmax)
     blue = scale_to_8bits(blue, vmin=vmin, vmax=vmax)
-
-    print(scaling_ranges)
 
     rgb = to_rgb_array(red, green, blue, alpha=alpha)
 
