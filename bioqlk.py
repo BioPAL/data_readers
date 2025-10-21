@@ -14,7 +14,9 @@
 #
 # Version history:
 #
-# * v1.6 (WIP):
+# * v1.7 (WIP):
+#     - Basic support for L1C products.
+# * v1.6:
 #     - Specify script dependencies in a PEP 722 compliant way
 #       (https://peps.python.org/pep-0722)
 #     - New functions for polarimetric RLLR coherence computation
@@ -88,6 +90,7 @@ import logging
 import pathlib
 import argparse
 import warnings
+import itertools
 import subprocess
 
 import numpy as np
@@ -153,21 +156,35 @@ def load_data(product_path: str, *, return_metadata: bool = False):
     basepath = pathlib.Path(product_path)
 
     try:
-        file_path = _first(
-            basepath.glob("measurement/bio_s[123]_scs__1s_*_i.vrt")
+        vrts = itertools.chain(
+            basepath.glob("measurement/bio_s[123]_scs__1s_*_i.vrt"),
+            basepath.glob("measurement/bio_s[123]_sta__1s_*_i.vrt")
         )
+        file_path = _first(vrts)
     except ValueError:
         raise FileNotFoundError(
-            f"unable to find 'bio_s[123]_scs__1s_*_i.vrt' in "
+            "unable to find 'bio_s[123]_scs__1s_*_i.vrt' or "
+            "'measurement/bio_s[123]_scs__1s_*_i.vrt' in "
             f"{basepath / 'measurement'}"
         )
+
+    product_type = file_path.name[7:10]
+    assert product_type in {"scs", "sta"}
 
     with rio.open(file_path) as src:
         data = src.read()
         metadata = src.meta.copy()
         gcps = src.get_gcps()
 
-    hh, hv, vh, vv = data
+    assert 3 <= data.shape[0] <= 4
+    if product_type == "scs":
+        assert data.shape[0] == 4
+        hh, hv, vh, vv = data
+    else:
+        assert product_type == "sta"
+        assert data.shape[0] == 3
+        hh, hv, vv = data
+        vh = hv
 
     if return_metadata:
         return hh, hv, vh, vv, metadata, gcps
