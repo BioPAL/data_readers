@@ -109,6 +109,7 @@ _log = logging.getLogger(__name__)
 DEFAULT_THRESHOLD = 0.01
 DEFAULT_CSCALE = 2.5
 DEFAULT_WINDOW_SIZE = (15, 3)
+DEFAULT_GEO_SPACING = 0.001  # [deg] - 0.001deg ~ 110m at equator
 TIFF_EXT = ".tif"  # ".tiff" is not OK for the MAAP viewer
 
 
@@ -1060,7 +1061,11 @@ def make_rgb(
                 save_rgb(
                     rgb, outfile_radar_geometry, metadata=metadata, gcps=gcps
                 )
-                warp_to_cog(outfile_radar_geometry, outfile)
+                warp_to_cog(
+                    outfile_radar_geometry,
+                    outfile,
+                    resolution=DEFAULT_GEO_SPACING,  # NOTE: hardcoded spacing
+                )
                 outfile_radar_geometry.unlink()
             else:
                 save_rgb(rgb, outfile, metadata=metadata, gcps=gcps)
