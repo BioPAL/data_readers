@@ -18,6 +18,7 @@
 #     - Basic support for L1C products.
 #     - New flag for generating GeoTIFF quick-looks in projected geometry
 #       (instead of RADAR geometry)
+#.    _- Use default values consistently in the CLI application.
 # * v1.6:
 #     - Specify script dependencies in a PEP 722 compliant way
 #       (https://peps.python.org/pep-0722)
@@ -753,6 +754,7 @@ def save_kmz(
         outfile,
         resolution=resolution,
         driver_name="KMLSUPEROVERLAY",
+        compress=None,
         extra_opts=extra_opts,
     )
     return outfile
@@ -1579,7 +1581,7 @@ def _get_ql_parser(subparsers) -> argparse.ArgumentParser:
         "--winsize",
         type=int,
         nargs=2,
-        default=[10, 2],
+        default=DEFAULT_WINDOW_SIZE,
         help="Size of the smoothing window [lines, samples] "
         "(default: %(default)s)",
     )
@@ -1613,7 +1615,7 @@ def _get_ql_parser(subparsers) -> argparse.ArgumentParser:
     parser.add_argument(
         "--kmz-res",
         type=float,
-        default=0.001,
+        default=DEFAULT_GEO_SPACING,
         help=(
             "resolution (in degrees) of the generated KMZ file. "
             "It is only used if also the '--kmz' option is specified"
@@ -1691,7 +1693,7 @@ def _get_coh_parser(subparsers) -> argparse.ArgumentParser:
         "--winsize",
         type=int,
         nargs=2,
-        default=[10, 2],
+        default=DEFAULT_WINDOW_SIZE,
         help="Size of the smoothing window [lines, samples] "
         "(default: %(default)s)",
     )
@@ -1716,7 +1718,7 @@ def _get_coh_parser(subparsers) -> argparse.ArgumentParser:
     parser.add_argument(
         "--kmz-res",
         type=float,
-        default=0.001,
+        default=DEFAULT_GEO_SPACING,
         help=(
             "resolution (in degrees) of the generated KMZ file. "
             "It is only used if also the '--kmz' option is specified"
@@ -1775,7 +1777,7 @@ def _get_rllr_parser(subparsers) -> argparse.ArgumentParser:
         "--winsize",
         type=int,
         nargs=2,
-        default=[10, 2],
+        default=DEFAULT_WINDOW_SIZE,
         help="Size of the smoothing window [lines, samples] "
         "(default: %(default)s)",
     )
@@ -1800,7 +1802,7 @@ def _get_rllr_parser(subparsers) -> argparse.ArgumentParser:
     parser.add_argument(
         "--kmz-res",
         type=float,
-        default=0.001,
+        default=DEFAULT_GEO_SPACING,
         help=(
             "resolution (in degrees) of the generated KMZ file. "
             "It is only used if also the '--kmz' option is specified"
