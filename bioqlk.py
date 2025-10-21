@@ -18,7 +18,7 @@
 #     - Basic support for L1C products.
 #     - New flag for generating GeoTIFF quick-looks in projected geometry
 #       (instead of RADAR geometry)
-#.    _- Use default values consistently in the CLI application.
+#     - Use default values consistently in the CLI application.
 # * v1.6:
 #     - Specify script dependencies in a PEP 722 compliant way
 #       (https://peps.python.org/pep-0722)
