@@ -16,6 +16,8 @@
 #
 # * v1.7 (WIP):
 #     - Basic support for L1C products.
+#     - New flag for generating GeoTIFF quick-looks in projected geometry
+#       (instead of RADAR geometry)
 # * v1.6:
 #     - Specify script dependencies in a PEP 722 compliant way
 #       (https://peps.python.org/pep-0722)
@@ -799,6 +801,7 @@ def warp_to_cog(
         outfile,
         driver_name="COG",
         t_srs=t_srs,
+        resolution=resolution,
         compress=compress,
     )
 
@@ -864,6 +867,7 @@ def make_rgb(
     kmz_res: float = 0.001,
     png_file: str | None = None,
     outdir: str | None = None,
+    projected: bool = False,
 ):
     """Read a BIOMASS L1A product and generate an RGB.
 
@@ -1050,7 +1054,16 @@ def make_rgb(
             warnings.simplefilter(
                 "ignore", rio.rasterio.errors.NotGeoreferencedWarning
             )
-            save_rgb(rgb, outfile, metadata=metadata, gcps=gcps)
+            if projected:
+                # TODO: reproject directly and avoid writing the image 2 times
+                outfile_radar_geometry = outfile.with_suffix(f".sr{TIFF_EXT}")
+                save_rgb(
+                    rgb, outfile_radar_geometry, metadata=metadata, gcps=gcps
+                )
+                warp_to_cog(outfile_radar_geometry, outfile)
+                outfile_radar_geometry.unlink()
+            else:
+                save_rgb(rgb, outfile, metadata=metadata, gcps=gcps)
 
         if kmz_file:
             if kmz_file is True:
@@ -1222,6 +1235,7 @@ def make_polarimetric_coherence(
         save_gtiff(
             coh.astype(np.complex64), outfile, metadata=metadata, gcps=gcps
         )
+
     # else:
     #     if not png_file or png_file is True:
     #         png_file = f"{product_path.name}_coh_{channels_str}.png"
@@ -1332,13 +1346,14 @@ def make_rllr_coherence(
             outfile = f"{product_path.name}_rllr-coh{TIFF_EXT}"
             if outdir is not None:
                 outfile = outdir / outfile
-
+ 
         save_gtiff(
             rllr_coh.astype(np.complex64),
             outfile,
             metadata=metadata,
             gcps=gcps,
         )
+
     # else:
     #     if not png_file or png_file is True:
     #         png_file = f"{product_path.name}_coh_{channels_str}.png"
@@ -1621,6 +1636,16 @@ def _get_ql_parser(subparsers) -> argparse.ArgumentParser:
         help=(
             "path to the output directory (only used if filenames for "
             "output files are not provided)"
+        ),
+    )
+
+    parser.add_argument(
+        "--projected",
+        action="store_true",
+        default=False,
+        help=(
+            "generated GeoTIFF files in projected geometry "
+            "(instead of RADAR geometry)"
         ),
     )
 
