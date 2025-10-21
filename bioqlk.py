@@ -1268,7 +1268,10 @@ def make_polarimetric_coherence(
         plot_coherence_statistics(
             coh,
             outfile=png_file,
-            title=f"Polarimetric coherence\n{product_path.stem}"
+            title=(
+                f"Polarimetric coherence ({channels_str})\n"
+                f"{product_path.stem}"
+            ),
         )
 
     return outfile
