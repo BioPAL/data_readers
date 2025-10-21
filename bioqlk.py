@@ -304,8 +304,8 @@ def lexicographic(
     if winsize is not None:
         red = np.abs(_smooth_cpx(hh, winsize, decimate=decimate))
         # green = 1 / np.sqrt(2) * (
-        #     np.abs(_smooth_cpx(hv, winsz))
-        #     + np.abs(_smooth_cpx(vh, winsz))
+        #     np.abs(_smooth_cpx(hv, winsize))
+        #     + np.abs(_smooth_cpx(vh, winsize))
         # )
         green = 1 / np.sqrt(2) * np.abs(
             _smooth_cpx(hv + vh, winsize, decimate=decimate)
@@ -422,7 +422,7 @@ def cpx_coherence(
         the same size is assume d for both dimensions of teh filter kernel.
     decimate : bool | int | tuple[int, int]
         enable data decimation after coherence computation.
-        If decimate is "True" then the decimation factor is equal to "winzise".
+        If decimate is "True" then the decimation factor is equal to "winsize".
         if a single positive integer is provided, then both the image
         dimensions are decimated with teh same value.
 
@@ -906,7 +906,7 @@ def make_rgb(
 
     # smoothing
     if max(winsize) > 1:
-        _log.info("Smoothing (winzise=%s)", winsize)
+        _log.info("Smoothing (winsize=%s)", winsize)
         assert min(winsize) >= 1
         red = smooth_nan(red, winsize, decimate=decimate)
         green = smooth_nan(green, winsize, decimate=decimate)
@@ -1616,7 +1616,7 @@ def _get_ql_parser(subparsers) -> argparse.ArgumentParser:
 def _get_coh_parser(subparsers) -> argparse.ArgumentParser:
     """Set up the argument parser for the "coh" sub-command."""
     name = "coh"
-    synopsis = "generate polarimetdic coherence images for BIOMASS"
+    synopsis = "generate polarimetric coherence images for BIOMASS"
     doc = """Tool for the generation of polarimetric coherence images
     for BIOMASS.
     """
@@ -1631,7 +1631,7 @@ def _get_coh_parser(subparsers) -> argparse.ArgumentParser:
         "--channels",
         choices=["hh-vv", "hh-hv", "vv-vh", "hv-vh"],
         default="hh-vv",
-        help="Polarimetric chnannels to be use dfor the coherence computation"
+        help="Polarimetric channels to be used for the coherence computation"
         "(default: %(default)s)",
     )
 
@@ -1709,7 +1709,7 @@ def _get_coh_parser(subparsers) -> argparse.ArgumentParser:
 def _get_rllr_parser(subparsers) -> argparse.ArgumentParser:
     """Set up the argument parser for the "rllr" sub-command."""
     name = "rllr"
-    synopsis = "generate polarimetdic RL-LR coherence images for BIOMASS"
+    synopsis = "generate polarimetric RL-LR coherence images for BIOMASS"
     doc = """Tool for the generation of polarimetric RL-LR coherence images
     (computed in circular basis) for BIOMASS.
     """
@@ -1794,7 +1794,7 @@ def _get_parser(subparsers=None) -> argparse.ArgumentParser:
     """Instantiate the command line argument (sub-)parser."""
     name = PROG
     extra_doc = """
-    The program is organizae in sub-commands.
+    The program is organized in sub-commands.
     Additional help can be obtained by using the '-h'/'--help' option
     on the specific sub-command.
     """
