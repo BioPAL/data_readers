@@ -831,7 +831,7 @@ def make_rgb(
     outfile: str | None = None,
     *,
     representation="pauli",
-    scale: EScale = EScale.DB,
+    scale: EScale = EScale.LINEAR_AMPLITUDE,
     alpha: int | bool | None = None,
     scaling_method: EScalingMethod = EScalingMethod.MEAN,
     kscale: float | None = None,
@@ -853,11 +853,25 @@ def make_rgb(
     Known limitation:
     * only L1A (SLC) product are supported so far (no L1B and no L1C)
     * pauli/lexicographical channels are scaled independently
+    * the "MEAN" scaling method (the default one) cannot be used with
+      "DB" scale
+
+    Parameters
+    ----------
+    product_path : str
+        path to the input BIOMASS L1A product
+    outfile : str (optional)
+        path to the output file for the quick-look
     """
     product_path = pathlib.Path(product_path)
     outdir = pathlib.Path(outdir) if outdir else None
     scaling_method = EScalingMethod(scaling_method)
     scale = EScale(scale)
+
+    if (scaling_method is EScalingMethod.MEAN and scale is EScale.DB):
+        raise ValueError(
+            "'MEAN' scaling method is incompatible with 'scale' 'DB'"
+        )
 
     kwargs = {}
     if isinstance(representation, str):
