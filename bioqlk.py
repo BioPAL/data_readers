@@ -1064,10 +1064,14 @@ def make_rgb(
         return png_file
 
 
-def plot_coherence_statistics(coh, outfile: str | None = None):
+def plot_coherence_statistics(
+    coh, outfile: str | None = None, title: str = ""
+):
     from matplotlib import pyplot as plt
 
     fig, ax = plt.subplots(2, 2, figsize=[10, 8])
+    if title:
+        fig.suptitle(title)
 
     coh_abs = np.abs(coh)
 
@@ -1116,7 +1120,7 @@ def plot_coherence_statistics(coh, outfile: str | None = None):
     )
     ax[1, 1].grid()
     ax[1, 1].set_xlabel("deg")
-    ax[1, 1].set_title("phase histogram")
+    ax[1, 1].set_title(r"$\angle coh$ histogram")
 
     mean = coh_ph.mean()
     std = coh_ph.std()
@@ -1259,7 +1263,11 @@ def make_polarimetric_coherence(
             if outdir is not None:
                 png_file = outdir / png_file
 
-        plot_coherence_statistics(coh, outfile=png_file)
+        plot_coherence_statistics(
+            coh,
+            outfile=png_file,
+            title=f"Polarimetric coherence\n{product_path.stem}"
+        )
 
     return outfile
 
@@ -1369,7 +1377,11 @@ def make_rllr_coherence(
             if outdir is not None:
                 png_file = outdir / png_file
 
-        plot_coherence_statistics(rllr_coh, outfile=png_file)
+        plot_coherence_statistics(
+            rllr_coh,
+            outfile=png_file,
+            title=f"RL-LR Polarimetric coherence\n{product_path.stem}"
+        )
 
     return outfile
 
@@ -1861,7 +1873,7 @@ def parse_args(args=None, namespace=None, parser=None):
             }
         if args.quick_test and args.kmz:
             warnings.warn(
-                "the '--quick' and the '--kmz' optionas are incompatible: "
+                "the '--quick' and the '--kmz' options are incompatible: "
                 "ignoring '--kmz'",
                 stacklevel=2,
             )
