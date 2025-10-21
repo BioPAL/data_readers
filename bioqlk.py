@@ -153,10 +153,12 @@ def load_data(product_path: str, *, return_metadata: bool = False):
     basepath = pathlib.Path(product_path)
 
     try:
-        file_path = _first(basepath.glob("measurement/bio_s1_scs__1s_*_i.vrt"))
+        file_path = _first(
+            basepath.glob("measurement/bio_s[123]_scs__1s_*_i.vrt")
+        )
     except ValueError:
         raise FileNotFoundError(
-            f"unable to find 'bio_s1_scs__1s_*_i.vrt' in "
+            f"unable to find 'bio_s[123]_scs__1s_*_i.vrt' in "
             f"{basepath / 'measurement'}"
         )
 
