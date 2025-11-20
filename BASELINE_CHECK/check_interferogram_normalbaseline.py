@@ -809,7 +809,7 @@ def get_info_baseline(product_primary, product_secondary,listinfobaseline):
     merged.update(info_pri)
     merged.update(info_sec)
     listinfobaseline.append(merged)
-    return listinfobaseline  
+    return listinfobaseline   
     
 def add_alpha_border(png_path, border=10):
     """Adds a transparent alpha channel along the edges of the PNG image."""
@@ -823,7 +823,7 @@ def add_alpha_border(png_path, border=10):
     alpha[:, -border:] = 0
     arr[:, :, 3] = alpha
     Image.fromarray(arr).save(png_path)
-    
+
 def make_white_transparent(png_path, threshold=250):
     """
     Makes white or near-white pixels transparent (RGBA).
@@ -843,10 +843,10 @@ def make_white_transparent(png_path, threshold=250):
 
     
     Image.fromarray(data).save(png_path)
-    print(f"[OK] Trasparenza applicata a: {png_path}")        
-
-
-
+    print(f"[OK] Trasparenza applicata a: {png_path}")    
+    
+    
+    
 
 def check_interferogram(path_primary, path_secondary, flatten, is_light, number_frame,coh_low_thr, coh_high_thr):
 
@@ -860,6 +860,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     # -- Open products (uses your BiomassProduct class)
     product_primary=    BiomassProduct.BiomassProductSTA(path_primary)
     product_secondary=  BiomassProduct.BiomassProductSTA(path_secondary)
+    
     listinfobaseline=list()
     get_info_baseline(product_primary, product_secondary,listinfobaseline)
     
@@ -885,11 +886,11 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     path_main_ann_primary = product_primary.annotation_coregistered_xml_file   
 
     data_secondary_abs =         product_secondary.measurement_abs_file  
-    preview_kml_sec  =       product_secondary.preview_kml_file
+    preview_kml_sec  =           product_secondary.preview_kml_file
     data_secondary_phase =       product_secondary.measurement_phase_file        
     path_lut_coregistered =      product_secondary.annotation_coregistered_lut_file  
     path_main_ann_coregistered = product_secondary.annotation_coregistered_xml_file  
-    
+
     print("\n[INFO] PRIMARY PRODUCT:")
     print(f"  - Measurement ABS:     {data_primary_abs}")
     print(f"  - Measurement PHASE:   {data_primary_phase}")
@@ -1015,7 +1016,8 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     output_filename = f"Hist_skpCalibrationPhaseScreen_pri_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png"
     output_path = output_folder_check_interferogram / output_filename 
     getHistogram(skpCalibrationPhaseScreen_pri, title="Histogram SKP Calibration Phase Screen (pri)", out_file=output_path,bins=200)
-   
+
+    
     #######################
     
     if not is_light:
@@ -1024,7 +1026,6 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             title=f"flatteningPhaseScreen_pri [rad] - {date_primary}",
             date=date_primary,
             out_file=output_folder_check_interferogram / f"flatteningPhaseScreen_pri_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png",
-            
         )
     
         save_phase_map_lut(
@@ -1047,7 +1048,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             date=date_secondary,
             out_file=output_folder_check_interferogram / f"skpCalibrationPhaseScreen_co_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png",
         )
-    
+   
     #preparation of the interpolators
     axes_in = (lut_az_axes_pri, lut_range_axis_pri) # as showed before you can use also the *co axes since they are equal as expteced 
     axes_out = (az_slc_axis_pri_stac, range_slc_axis_pri_stac) # as showed before you can use also the *co axes since they are equal as expteced 
@@ -1233,10 +1234,10 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         vmax=1,
         vmin=0.001,
         no_interp=False,
-        cb='Greys_r', 
-        file_2_save=output_folder_check_interferogram / f"cho_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png")
+        cb='Greys_r', file_2_save=output_folder_check_interferogram / f"cho_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png")
 
 
+    '''
     if not is_light:
         # Coherence amplitude
         img = Image.fromarray(coh_abs)
@@ -1249,7 +1250,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         new_size = (img.width // 2, img.height // 2)
         img_resized = img.resize(new_size, resample=Image.BILINEAR)
         img_resized.save(output_folder_check_interferogram / f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}.tif")
- 
+    '''     
         
     # -------------------------------------------------------------------------
     # 4. Save "clean" PNG maps (without axes or colorbar)
@@ -1257,7 +1258,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     print("[INFO] Saving clean PNG maps...")
 
     coh_phase_png = output_folder_check_interferogram / f"coherence_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml.png"
-    coh_abs_png = output_folder_check_interferogram / f"coherence_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml.png"
+    coh_abs_png = output_folder_check_interferogram / f"coherence_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml.png"
 
     save_clean_image(coh_phase, cmap='RdBu', out_path=coh_phase_png, vmin=-np.pi, vmax=np.pi)
     save_clean_image(coh_abs, cmap='Greys_r', out_path=coh_abs_png, vmin=0, vmax=np.nanmax(coh_abs))
@@ -1284,12 +1285,12 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     # NB: get_info_baseline ha fatto listinfobaseline.append(info) -> lista con un solo dict
     baseline_info = listinfobaseline[0] if listinfobaseline else {}
     
-
+    # Unisci i metadati baseline dentro "row"
     row.update(baseline_info)
     # -------------------------------------------------------------------------
     # 5. Prepara il KML con popup e colorbar laterale
     # -------------------------------------------------------------------------
-    preview_kml_sec = Path(preview_kml_sec)  # path già definito sopra
+    preview_kml_sec = Path(preview_kml_sec) 
     
     if not preview_kml_sec.exists():
         print(f"[WARN] Preview KML not found: {preview_kml_sec}")
@@ -1304,7 +1305,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             "Median coh abs": row["coh_median"],
         }
     
-      
+        # Chiavi baseline che vuoi mostrare (verifica che esistano prima di aggiungerle)
         fieldnames = [
         # identificativi STA
         "primary_sta", "secondary_sta",
@@ -1341,9 +1342,17 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         for k in fieldnames:
             if k in row:
                 coh_stats[k] = row[k]
-    
-
-
+        '''
+        # Colorbar verticale 0–1 per la coerenza ABS (come immagine separata)
+        colorbar_png_path = output_folder_check_interferogram / f"colorbar_coh_abs_{date_primary}_{date_secondary}.png"
+        save_colorbar_png(
+            colorbar_png_path,
+            cmap='Greys_r', vmin=0.0, vmax=1.0,
+            ticks=(0.0, 0.5, 1.0),
+            label='Coherence amplitude'
+        )
+        '''
+        # Crea il KML (usa il PNG "pulito" della coerenza ABS)
         kmz_overlay = output_folder_check_interferogram / f"{coh_abs_png.stem}.kmz"
         make_overlay_kmz_with_quad(
                 kmz_out=kmz_overlay,
@@ -1360,8 +1369,74 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         )
         print(f"[OK] KML created with popup + side colorbar: {kmz_overlay}")
     
-    #except Exception as e:
-    #    print(f"[WARN] KML creation failed: {e}")
+    
+    
+    # --- Coherence stats ---
+    coh_mean   = float(np.nanmean(coh_abs))
+    coh_min    = float(np.nanmin(coh_abs))
+    coh_max    = float(np.nanmax(coh_abs))
+    coh_median = float(np.nanmedian(coh_abs))
+    
+
+    # ---------------- CSV per la cartella di questo stack ----------------
+    stack_folder = path_primary.parent.parent
+    summary_csv = stack_folder / "coherence_summary.csv"
+
+    # recupero info baseline aggiunta poco fa (relativa al PRIMARY)
+    baseline_info = listinfobaseline[-1] if listinfobaseline else {}
+
+    # nomi prodotti STA (fallback se .root non esiste)
+    primary_sta_name   = Path(getattr(product_primary,  "root", path_primary)).name
+    secondary_sta_name = Path(getattr(product_secondary,"root", path_secondary)).name
+
+
+
+
+
+    
+    
+    
+    # componi la riga: unisci baseline + stats + metadati
+    row_dict = {
+        **{k: baseline_info.get(k, "") for k in baseline_info.keys()}, 
+      "primary_sta": primary_sta_name,
+      "secondary_sta": secondary_sta_name,
+
+      "mean(|coh|)":   float(coh_mean),
+      "min(|coh|)":    float(coh_min),
+      "max(|coh|)":    float(coh_max),
+      "median(|coh|)": float(coh_median),
+
+      "frame":              str(number_frame),
+      "phaseCorrectionMode": str(flatten),
+      "date_primary":        date_primary,
+      "date_secondary":      date_secondary,
+    }
+
+
+    # normalizza eventuali chiavi mancanti (evita KeyError)
+    for k in fieldnames:
+        row_dict.setdefault(k, "")
+    
+    import csv
+    write_header = not summary_csv.exists()
+    with open(summary_csv, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        if write_header:
+            w.writeheader()
+        w.writerow(row_dict)
+
+    print(f"[INFO] CSV updated: {summary_csv}")        
+    try:
+      lut_co.close()
+    except Exception:
+      pass
+    try:
+      lut_pri.close()
+    except Exception:
+      pass    
+    
+        
 
 
 def extract_date_from_scs_name(scs_name):
@@ -1384,11 +1459,11 @@ def find_matching_sta(start_time, sta_list):
     return None
 
 
-def main(path_stacks_folder, mode="light",
-         coh_low_thr=COH_LOW_THRESHOLD,
+def run_check_interferogram(path_stacks_folder, mode="light" ,coh_low_thr=COH_LOW_THRESHOLD,
          coh_high_thr=COH_HIGH_THRESHOLD):
     is_light = mode.lower() == "light"
-    
+    print(coh_low_thr)
+    print(coh_high_thr)
     print ('----------------------------------------------------------------------------')
     print(f"Mode selected: {'light' if is_light else 'all'}")
     print ('----------------------------------------------------------------------------')
@@ -1437,10 +1512,7 @@ def main(path_stacks_folder, mode="light",
         print(f"skpPhaseCalibrationFlag: {skpPhaseCalibrationFlag}")
         print(f"skpPhaseCorrectionFlag: {skpPhaseCorrectionFlag}")
         print(f"skpPhaseCorrectionFlatteningOnlyFlag: {skpPhaseCorrectionFlatteningOnlyFlag}")
-        #<skpPhaseCalibrationFlag>false</skpPhaseCalibrationFlag>
-        #<skpPhaseCorrectionFlag>true</skpPhaseCorrectionFlag>
- 
-        #ideallly it would be triggered by this product metadata
+
 
         
         if skpPhaseCorrectionFlag:
@@ -1471,62 +1543,228 @@ def main(path_stacks_folder, mode="light",
             print(f"[OK] Matches found:\n - PRIMARY:  {sta_primary.name}\n - SECONDARY:{sta_secondary.name}")
             check_interferogram(sta_primary, sta_secondary, flatten, is_light, number_frame,coh_low_thr, coh_high_thr)
 
-    
+
+
+
+
+
+def extract_timestamp_from_name(name: str):
+    """Estrae il primo timestamp nel formato 20251006T214636 dal nome del prodotto"""
+    match = re.search(r"(20\d{6}T\d{6})", name)
+    return match.group(1) if match else None
+
+def extract_frame_from_name(name: str):
+    """Estrae il frame number (es. F173)"""
+    match = re.search(r"(F\d{3})", name)
+    return match.group(1) if match else None
+
+def create_folder_name(index, inputs):
+    """Crea il nome della folder per lo stack"""
+    timestamps = [extract_timestamp_from_name(i) for i in inputs]
+    timestamps = [t for t in timestamps if t]
+    frame = extract_frame_from_name(inputs[0]) or "FXXX"
+    start = min(timestamps)
+    stop = max(timestamps)
+    folder_name = f"{index:02d}_{start}_{stop}_{frame}"
+    return folder_name
+
+def cleanup_sta_products(stack_folder: Path, dry_run: bool = False) -> None:
+    """
+    Rimuove le directory dei prodotti STA estratti dentro stack_folder,
+    lasciando intatte le cartelle di output 'check_interferogram_*' e file CSV.
+    """
+    if not isinstance(stack_folder, Path):
+        stack_folder = Path(stack_folder)
+
+    to_delete = []
+    for p in stack_folder.iterdir():
+        if not p.is_dir():
+            continue
+        name = p.name
+        # Mantieni risultati e altre cartelle non-STA
+        if name.startswith("check_interferogram_"):
+            continue
+        # Candidati: directory dei prodotti STA
+        if "STA__1S" in name:
+            to_delete.append(p)
+
+    if not to_delete:
+        print("[CLEANUP] Nessuna directory STA da rimuovere.")
+        return
+
+    print("[CLEANUP] Rimuovo le seguenti directory STA:")
+    for d in to_delete:
+        print(f"  - {d}")
+
+    if dry_run:
+        print("[CLEANUP] DRY-RUN attivo: nessuna rimozione eseguita.")
+        return
+
+    for d in to_delete:
+        try:
+            shutil.rmtree(d)
+            print(f"[CLEANUP] Rimossa: {d}")
+        except Exception as e:
+            print(f"[CLEANUP][ERRORE] Impossibile rimuovere {d}: {e}")
+
+
+
+def main(XML_FILE):
+    print('----------------------------------------------------------------------------')
+    print('MAIN')
+    print('----------------------------------------------------------------------------')
+    coh_low_thr=0.35
+    coh_high_thr=0.8
+    mode="all"
+    xml_path = Path(XML_FILE).resolve()  # converte in percorso assoluto
+    BASE_OUTPUT_DIR = xml_path.parent.parent / "RESULTS"  # aggiunge la cartella "output"
+
+    print(f"XML path:         {xml_path}")
+    print(f"Output directory: {BASE_OUTPUT_DIR}")
+
+    BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # crea la cartella se non esiste
+    print(f"[INFO] Parsing XML file: {XML_FILE}")
+    tree = ET.parse(XML_FILE)
+    root = tree.getroot()
+
+    stacks = root.findall("stack")
+  
+    CLEANUP_ON_FAILURE=True
+    #per ogni gruppo di stack 
+    for idx, stack in enumerate(stacks, start=1):
+        inputs = [inp.text.strip() for inp in stack.findall("input")]
+        folder_name = create_folder_name(idx, inputs)
+        stack_folder = BASE_OUTPUT_DIR / folder_name
+
+        # crea la folder
+        if not stack_folder.exists():
+            stack_folder.mkdir(parents=True)
+            print(f"[INFO] Created folder: {stack_folder}")
+           
+        # scarica i prodotti
+        for istack in inputs:
+            print(f"[INFO] Downloading product: {istack}")
+            cmd = [
+                "runBioDownloadSingle",  # comando bash
+                "BiomassLevel1cIOC",    # nome della collezione
+                istack,                 # nome del prodotto
+                str(stack_folder)       # cartella di destinazione
+            ]
+
+            # esegui il comando
+            try:
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"[ERROR] Download failed for {istack}: {e}")
+                
+            # Trova i file zip appena scaricati
+        for zip_file in stack_folder.glob("*.zip"):
+            print(f"[INFO] Unzipping {zip_file.name}")
+            try:
+                    with zipfile.ZipFile(zip_file, 'r') as zf:
+                        zf.extractall(stack_folder)
+                    print(f"[OK] Extracted {zip_file.name}")
+                    zip_file.unlink()  # elimina lo zip
+                    print(f"[OK] Deleted {zip_file.name}")
+            except Exception as e:
+                    print(f"[ERROR] Failed to unzip {zip_file.name}: {e}")
+        #    lanciare check_inteferogram su quella folder
+        # check_interferogram con protezione: se fallisce, continua col prossimo stack
+        try:
+            run_check_interferogram(stack_folder, mode,coh_low_thr, coh_high_thr)
+        
+        except Exception as e:
+
+            print(f"[ERROR] check_interferogram FAILED for stack {stack_folder.name}: {e}")
+
+            try:
+                (stack_folder / "check_interferogram_error.txt").write_text(str(e))
+            except Exception:
+                pass
+            if CLEANUP_ON_FAILURE:
+                try:
+                    cleanup_sta_products(stack_folder, dry_run=False)
+                except Exception as ce:
+                    print(f"[CLEANUP][WARN] Cleanup after failure raised: {ce}")
+            continue  # passa al prossimo stack
+
+        # se il check è andato a buon fine, fai la pulizia
+        try:
+            cleanup_sta_products(stack_folder, dry_run=False)
+        except Exception as ce:
+            print(f"[CLEANUP][WARN] Cleanup raised: {ce}")
+            
 
 
 def print_help():
+
     """
     Print command-line usage instructions for the script.
     """
     help_message = """
-[USAGE]
-    python check_interferogram.py <path_stacks_folder> [mode] [coh_low_thr] [coh_high_thr]
+-------------------------------------------------------------------------------
+BIOMASS – Interferogram Checker
+-------------------------------------------------------------------------------
 
-[DESCRIPTION]
-    For each STA product,
-    it identifies the primary and secondary SCS images from the annotation,
-    finds the corresponding STA folders, and generates:
+USAGE:
+    python check_interferogram.py <PATH_TO_XML_STACK_LIST>
 
-        - Flattening phase maps (original and upsampled)
-        - Interferometric phase
-        - Coherence amplitude and phase 
+DESCRIPTION:
+    The script reads an XML file containing multiple <stack> entries.
+    Each stack lists a set of BIOMASS Level-1 STA products.
+    For each stack the script:
 
-    Results are saved in a dedicated folder named:
-        check_interferogram_<primary_date>_<secondary_date>[_flatten]
+      1. Creates an output folder inside RESULTS/
+      2. Downloads all products listed in the <stack>
+      3. Unzips them
+      4. Runs the interferogram and coherence analysis
+      5. Generates:
+         - coherence amplitude/phase PNGs
+         - flattened phase maps
+         - LUT and histogram images
+         - a KMZ overlay with popup statistics
+      6. Appends summary coherence statistics to coherence_summary.csv
+      7. Removes the extracted STA product folders (cleanup)
 
-[ARGUMENTS]
-    <path_stacks_folder>   : Path to the folder containing STA product directories.
-    <mode>                 : Optional. Set to "all" to generate just coh_amp and coh_phase png. Default is "light".
-    <coh_low_thr>         : Optional. Low threshold for coherence color mapping (default 0.35)
-    <coh_high_thr>        : Optional. High threshold for coherence color mapping (default 0.80)
+ARGUMENTS:
+    <PATH_TO_XML_STACK_LIST>   Path to the XML file containing:
+                               <stack>
+                                 <input>PRODUCT_NAME</input>
+                                 <input>PRODUCT_NAME</input>
+                                 ...
+                               </stack>
 
-[EXAMPLES]
-    # With light mode
-    python check_interferogram.py /data/biomass/stack_folder light
+OUTPUT STRUCTURE:
+    RESULTS/
+        01_YYYYMMDD_YYYYMMDD_Fxxx/
+            check_interferogram_*
+            coherence_summary.csv
+            (KMZ, PNG, histograms, phase maps, etc.)
 
-    # Full processing 
-    python check_interferogram.py /data/biomass/stack_folder all
+EXAMPLES:
+    python check_interferogram.py stacks_test.xml
+
+    python check_interferogram.py /home/user/stacks_list.xml
+
+NOTES:
+    - The script calls 'runBioDownloadSingle', so the tool must be available
+      in your environment.
+    - All intermediate STA folders are cleaned up unless CLEANUP_ON_FAILURE=False.
+
+
+-------------------------------------------------------------------------------
 """
+
     print(help_message)
-  
+
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 1:
         print_help()
     else:
-        path_stacks_folder = sys.argv[1]
-        mode = sys.argv[2] if len(sys.argv) > 2 else "light"
+        path_xml= sys.argv[1]
+        main(path_xml)
 
-        try:
-            coh_low_thr = float(sys.argv[3]) if len(sys.argv) > 3 else COH_LOW_THRESHOLD
-            coh_high_thr = float(sys.argv[4]) if len(sys.argv) > 4 else COH_HIGH_THRESHOLD
-        except ValueError:
-            print("[WARN] Invalid threshold values. Using defaults.")
-            coh_low_thr = COH_LOW_THRESHOLD
-            coh_high_thr = COH_HIGH_THRESHOLD
-
-        print(f"[INFO] Coherence thresholds: LOW={coh_low_thr}, HIGH={coh_high_thr}")
-        main(path_stacks_folder, mode, coh_low_thr, coh_high_thr)
 
 
 
