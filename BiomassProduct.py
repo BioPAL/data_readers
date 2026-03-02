@@ -36,6 +36,52 @@ from shapely.geometry import Polygon
 from xml.etree import ElementTree as ET
 from pathlib import Path
 
+class auxatt:
+    def __init__(self, path):
+
+        self.path = Path(path)
+        self.path = Path(path)
+        self.data_dir = self.path / "data" 
+        print(self.data_dir)
+        self.data_file = next( self.data_dir.glob("*_attitude.xml"), None)
+        print(self.data_file)
+        tree = ET.parse(self.data_file)
+        root = tree.getroot()
+    
+        start_str = root.findtext(".//Validity_Start")
+        stop_str = root.findtext(".//Validity_Stop")
+    
+        if start_str.startswith("UTC="):
+            start_str = start_str.replace("UTC=", "")
+        if stop_str.startswith("UTC="):
+            stop_str = stop_str.replace("UTC=", "")
+    
+        self.start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+        self.stop_time = datetime.strptime(stop_str, "%Y-%m-%dT%H:%M:%S")
+        
+
+class auxorb:
+    def __init__(self, path):
+
+        self.path = Path(path)
+        self.data_dir = self.path / "data" 
+        print(self.data_dir)
+        self.data_file = next( self.data_dir.glob("*_orbit.xml"), None)
+        print(self.data_file)
+        tree = ET.parse(self.data_file)
+        root = tree.getroot()
+    
+        start_str = root.findtext(".//Validity_Start")
+        stop_str = root.findtext(".//Validity_Stop")
+    
+        if start_str.startswith("UTC="):
+            start_str = start_str.replace("UTC=", "")
+        if stop_str.startswith("UTC="):
+            stop_str = stop_str.replace("UTC=", "")
+    
+        self.start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+        self.stop_time = datetime.strptime(stop_str, "%Y-%m-%dT%H:%M:%S")
+
 class BiomassProductL1VFRA:
      def __init__(self, eof_path):
          print('__init__')
@@ -1101,8 +1147,10 @@ class BiomassProductSTA:
         self.measurement_phase_file = next(self.measurement_dir.glob("*phase*.tiff"), None)
         self.measurement_vrt_file = next(self.measurement_dir.glob("*.vrt"), None)
         #search file in  annotation coregistrated
-        self.annotation_coregistered_xml_file = next(self.annotation_coregistered_dir.glob("*.xml"), None)
-        self.annotation_coregistered_lut_file = next(self.annotation_coregistered_dir.glob("*.nc"), None)
+        self.annotation_coregistered_xml_file = next(self.annotation_coregistered_dir.glob("bio*_annot.xml"), None)
+        
+        self.annotation_coregistered_lut_file = next(self.annotation_coregistered_dir.glob("bio*_lut.nc"), None)
+
         self.annotation_cor_att_file = next(self.annotation_coregistrated_navigation_dir.glob("*att*.xml"), None)
         self.annotation_cor_orb_file = next(self.annotation_coregistrated_navigation_dir.glob("*orb*.xml"), None)
         
@@ -1116,11 +1164,175 @@ class BiomassProductSTA:
         self.preview_kml_file = next(self.preview_dir.glob("*.kml"), None)
         
         self.load_lut_variables()        
-        self.is_primary = self.check_if_primary()
+        
         self.noDataValue=self.get_nodata_value()
         
         self.load_mph()
+        self.load_annotation_coregistered()
+    
+    
+    def _parse_rfi_report_list(self, root, base_xpath, report_tag):
+      """
+        Parse RFI report lists (isolated / persistent) and return a dict:
+        {
+          "HH": {...},
+          "HV": {...},
+          ...
+        }
+      """
+      reports = {}
+
+      for rep in root.findall(f"{base_xpath}/{report_tag}"):
+          pol = rep.attrib.get("polarisation")
+          if pol is None:
+              continue
+
+          entry = {}
+          for child in rep:
+              if child.text is None:
+                  continue
+              try:
+                entry[child.tag] = float(child.text)
+              except ValueError:
+                  entry[child.tag] = child.text
+
+          reports[pol] = entry
+
+      return reports if reports else None
+    
+    
+    
+    
+    def load_annotation_coregistered(self):
+        """
+        Parse annotation_coregistered XML and extract coregistration + RFI parameters
+        needed to populate the 'stack' DB table.
+
+        Populates (as attributes):
+          - primaryImage, secondaryImage
+          - normalBaseline, averageRangeCoregistrationShift, averageAzimuthCoregistrationShift
+          - rfiDetectionFlag, rfiCorrectionFlag, rfiMitigationMethod, rfiMask, rfiMaskGenerationMethod
+          - (optional) annotation_startTime, annotation_stopTime, annotation_noDataValue
+        """
+        xml_path = self.annotation_coregistered_xml_file
+        if xml_path is None:
+            raise FileNotFoundError("annotation_coregistered XML not found.")
+
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        def _get_text(xpath: str):
+            el = root.find(xpath)
+            if el is None or el.text is None:
+                return None
+            return el.text.strip()
+
+        def _get_bool(xpath: str):
+            txt = _get_text(xpath)
+            if txt is None:
+                return None
+            return txt.lower() == "true"
+
+        def _get_int(xpath: str):
+            txt = _get_text(xpath)
+            if txt is None:
+                return None
+            try:
+                return int(txt)
+            except ValueError:
+                return None
+
+        def _get_float(xpath: str):
+            txt = _get_text(xpath)
+            if txt is None:
+                return None
+            try:
+                return float(txt)
+            except ValueError:
+                return None
+
+        # -------------------------
+        # Acquisition info (optional, sometimes useful for cross-checks)
+        # -------------------------
+        self.missionPhaseID = _get_text("./acquisitionInformation/missionPhaseID")
+        self.annotation_startTime = _get_text("./acquisitionInformation/startTime")
+        self.annotation_stopTime  = _get_text("./acquisitionInformation/stopTime")
+        self.overallProductQualityIndex  = _get_int("./staQuality/overallProductQualityIndex")
+        # noDataValue (often used later for raster handling)
+        self.annotation_noDataValue = _get_float("./sarImage/noDataValue")
+
+        # -------------------------
+        # STA Coregistration parameters (the important part for the stack table)
+        # -------------------------
+        coreg_base = "./staCoregistrationParameters"
+
+        self.primaryImage   = _get_text(f"{coreg_base}/primaryImage")
+        self.secondaryImage = _get_text(f"{coreg_base}/secondaryImage")
         
+  
+        
+        self.skpPhaseCalibrationFlag                = _get_bool(f"{coreg_base}/skpPhaseCalibrationFlag")
+        self.skpPhaseCorrectionFlag                 = _get_bool(f"{coreg_base}/skpPhaseCorrectionFlag")        
+        self.skpPhaseCorrectionFlatteningOnlyFlag   = _get_bool(f"{coreg_base}/skpPhaseCorrectionFlatteningOnlyFlag")
+        
+
+        self.normalBaseline                         = _get_float(f"{coreg_base}/normalBaseline")
+        self.averageRangeCoregistrationShift        = _get_float(f"{coreg_base}/averageRangeCoregistrationShift")
+        self.averageAzimuthCoregistrationShift      = _get_float(f"{coreg_base}/averageAzimuthCoregistrationShift")
+        
+        
+        sta_proc= "./staProcessingParameters"
+        self.coregistrationMethod    =  _get_text(f"{sta_proc}/coregistrationMethod")
+        
+        
+
+        # -------------------------
+        # RFI fields (needed for your added DB columns)
+        # -------------------------
+        proc_base = "./processingParameters"
+
+        self.rfiDetectionFlag        = _get_text(f"{proc_base}/rfiDetectionFlag")
+        self.rfiCorrectionFlag       = _get_text(f"{proc_base}/rfiCorrectionFlag")
+        self.rfiMitigationMethod     = _get_text(f"{proc_base}/rfiMitigationMethod")
+        self.rfiMask                 = _get_text(f"{proc_base}/rfiMask")
+        self.rfiMaskGenerationMethod = _get_text(f"{proc_base}/rfiMaskGenerationMethod")
+
+        # NOTE:
+        # rfiFMChirpSource and rfiFMMitigationMethod are present only
+        # in newer STA monitoring products. Older products legitimately
+        # do not contain these tags -> keep None / NULL in DB.
+
+        self.rfiFMChirpSource        = _get_text(f"{proc_base}/rfiFMChirpSource")
+        self.rfiFMMitigationMethod   = _get_text(f"{proc_base}/rfiFMMitigationMethod")
+        
+        
+
+
+        # -------------------------
+        # Minimal validation (optional but recommended)
+        # -------------------------
+        if self.primaryImage is None or self.secondaryImage is None:
+            # In your XML they should always exist; if not, fail early.
+            raise ValueError(
+                f"Missing primaryImage/secondaryImage in annotation_coregistered XML: {xml_path}"
+            )
+        # -------------------------
+        # RFI Mitigation reports (NEW)
+        # -------------------------
+        rfi_base = "./rfiMitigation"
+
+        self.rfiIsolatedFMReport = self._parse_rfi_report_list(
+            root,
+            f"{rfi_base}/rfiIsolatedFMReportList",
+            "rfiIsolatedFMReport")
+
+        self.rfiPersistentFMReport = self._parse_rfi_report_list(
+            root,
+            f"{rfi_base}/rfiPersistentFMReportList",
+            "rfiPersistentFMReport")
+            
+    
+    
     
     def load_mph(self):
         """
@@ -1211,7 +1423,7 @@ class BiomassProductSTA:
         self.processorVersion   = _get_text(root, f"{pbase}/eop:processorVersion", str)
         self.processingLevel    = _get_text(root, f"{pbase}/eop:processingLevel", str)
         self.processingMode     = _get_text(root, f"{pbase}/eop:processingMode", str)
-        
+        self.isCoregistrationPrimary    = _get_text(root,f"{pbase}/bio:isCoregistrationPrimary",bool)
         
         # =========================
         # Center of footprint (gml:pos)
@@ -1258,41 +1470,8 @@ class BiomassProductSTA:
             
         
     
-    def check_if_primary(self):
-
-        """
-        Determine whether the current STA product is the primary one in a coregistered pair.
-    
-        This is done by:
-        1. Extracting the 'primaryImage' name from the annotation_coregistered_xml_file.
-        2. Extracting the 'startTime' of the current product from the same XML.
-        3. Comparing the dates (YYYYMMDD) from both sources.
-        
-        If the date of 'startTime' matches the one in 'primaryImage', this product is the primary.
-        """
-        try:
-            tree = ET.parse(self.annotation_coregistered_xml_file)
-            root = tree.getroot()
-    
-            # Extract <primaryImage> and get the date part (YYYYMMDD)
-            primary_image_tag = root.find(".//primaryImage")
-            
-            primary_image_text = primary_image_tag.text
-            date_from_primary = primary_image_text.split("_")[5][:8]  # '20170228'
-            
-            # Extract <startTime> and convert to YYYYMMDD
-            start_time_tag = root.find(".//acquisitionInformation/startTime")
-            
-            start_time_text = start_time_tag.text  # e.g. '2017-02-28T09:45:37.702537'
-            date_from_start = datetime.datetime.strptime(start_time_text, "%Y-%m-%dT%H:%M:%S.%f").strftime("%Y%m%d")
-            
-            
-            return date_from_primary == date_from_start
-    
-        except Exception as e:
-            print(f"Error in check_if_primary: {e}")
-            return False
-        
+  
+      
         
     def get_nodata_value(self):
         """
@@ -1322,11 +1501,12 @@ class BiomassProductSTA:
         Load all LUT variables from the NetCDF file and store them as both attributes (self.<var>)
         and in a dictionary (self.lut_variables) for easy access and inspection.
         """
+
         if not self.annotation_coregistered_lut_file:
             raise FileNotFoundError("LUT NetCDF file path not set.")
     
         self.lut_variables = {}  # Initialize dictionary
-    
+        
         # Load root-level variables
         try:
             root_ds = xr.open_dataset(self.annotation_coregistered_lut_file)
@@ -2705,6 +2885,550 @@ class l2b_agb(BiomassProductL2):
         print("- Annotation Heatmap File:", self.annotation_heatmap_file)
         print("- Annotation Acquisition id  File:", self.annotation_acquisition_file)
         print("- Annotation bps File:", self.annotation_bps_fnf_file)  
+
+
+
+class BiomassProductSTA_monitoring:
+    
+    """
+    Class representing a BIOMASS STA product.
+
+    This class parses and organizes the product directory structure, including measurement, annotation,
+    preview, and schema folders. It automatically identifies key files such as .tiff, .xml, and .kmz.
+    """
+    def __init__(self, path):
+        self.path = Path(path)
+        print (self.path)
+        self.mph = next(self.path.glob("bio*sta*.xml"), None)
+        #search directory
+        self.annotation_coregistered_dir = self.path / "annotation_coregistered"
+        self.annotation_coregistrated_navigation_dir = self.path / "annotation_coregistered/navigation"        
+        self.annotation_primary_dir = self.path / "annotation_primary"
+        self.annotation_primary_navigation_dir = self.path / "annotation_primary/navigation"
+        self.preview_dir = self.path / "preview"          
+        self.schema_dir = self.path / "schema"
+
+        #search file in  annotation coregistrated
+        self.annotation_coregistered_xml_file = next(self.annotation_coregistered_dir.glob("*.xml"), None)
+        self.annotation_coregistered_lut_file = next(self.annotation_coregistered_dir.glob("*.nc"), None)
+        self.annotation_cor_att_file = next(self.annotation_coregistrated_navigation_dir.glob("*att*.xml"), None)
+        self.annotation_cor_orb_file = next(self.annotation_coregistrated_navigation_dir.glob("*orb*.xml"), None)
+        
+        #search file in  annotation primary
+        self.annotation_primary_xml_file = next(self.annotation_primary_dir.glob("*.xml"), None)
+        self.annotation_pri_att_file = next(self.annotation_primary_navigation_dir.glob("*att*.xml"), None)
+        self.annotation_pri_orb_file = next(self.annotation_primary_navigation_dir.glob("*orb*.xml"), None)
+        
+        #search file in  preview
+        self.preview_ql_file = next(self.preview_dir.glob("*.png"), None)
+        self.preview_kml_file = next(self.preview_dir.glob("*.kml"), None)
+        
+        self.load_lut_variables()        
+        self.noDataValue=self.get_nodata_value()
+        
+        self.load_mph()
+        self.load_annotation_coregistered()
+
+    def _parse_rfi_report_list(self, root, base_xpath, report_tag):
+      """
+        Parse RFI report lists (isolated / persistent) and return a dict:
+        {
+          "HH": {...},
+          "HV": {...},
+          ...
+        }
+      """
+      reports = {}
+
+      for rep in root.findall(f"{base_xpath}/{report_tag}"):
+          pol = rep.attrib.get("polarisation")
+          if pol is None:
+              continue
+
+          entry = {}
+          for child in rep:
+              if child.text is None:
+                  continue
+              try:
+                entry[child.tag] = float(child.text)
+              except ValueError:
+                  entry[child.tag] = child.text
+
+          reports[pol] = entry
+
+      return reports if reports else None
+    
+    def load_annotation_coregistered(self):
+        """
+        Parse annotation_coregistered XML and extract coregistration + RFI parameters
+        needed to populate the 'stack' DB table.
+
+        Populates (as attributes):
+          - primaryImage, secondaryImage
+          - normalBaseline, averageRangeCoregistrationShift, averageAzimuthCoregistrationShift
+          - rfiDetectionFlag, rfiCorrectionFlag, rfiMitigationMethod, rfiMask, rfiMaskGenerationMethod
+          - (optional) annotation_startTime, annotation_stopTime, annotation_noDataValue
+        """
+        xml_path = self.annotation_coregistered_xml_file
+        if xml_path is None:
+            raise FileNotFoundError("annotation_coregistered XML not found.")
+
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        def _get_text(xpath: str):
+            el = root.find(xpath)
+            if el is None or el.text is None:
+                return None
+            return el.text.strip()
+
+        def _get_bool(xpath: str):
+            txt = _get_text(xpath)
+            if txt is None:
+                return None
+            return txt.lower() == "true"
+
+        def _get_int(xpath: str):
+            txt = _get_text(xpath)
+            if txt is None:
+                return None
+            try:
+                return int(txt)
+            except ValueError:
+                return None
+
+        def _get_float(xpath: str):
+            txt = _get_text(xpath)
+            if txt is None:
+                return None
+            try:
+                return float(txt)
+            except ValueError:
+                return None
+
+        # -------------------------
+        # Acquisition info (optional, sometimes useful for cross-checks)
+        # -------------------------
+        self.annotation_startTime = _get_text("./acquisitionInformation/startTime")
+        self.annotation_stopTime  = _get_text("./acquisitionInformation/stopTime")
+
+        # noDataValue (often used later for raster handling)
+        self.annotation_noDataValue = _get_float("./sarImage/noDataValue")
+
+        # -------------------------
+        # STA Coregistration parameters (the important part for the stack table)
+        # -------------------------
+        coreg_base = "./staCoregistrationParameters"
+
+        self.primaryImage   = _get_text(f"{coreg_base}/primaryImage")
+        self.secondaryImage = _get_text(f"{coreg_base}/secondaryImage")
+
+        self.normalBaseline = _get_float(f"{coreg_base}/normalBaseline")
+        self.averageRangeCoregistrationShift   = _get_float(f"{coreg_base}/averageRangeCoregistrationShift")
+        self.averageAzimuthCoregistrationShift = _get_float(f"{coreg_base}/averageAzimuthCoregistrationShift")
+
+        # -------------------------
+        # RFI fields (needed for your added DB columns)
+        # -------------------------
+        proc_base = "./processingParameters"
+
+        self.rfiDetectionFlag        = _get_bool(f"{proc_base}/rfiDetectionFlag")
+        self.rfiCorrectionFlag       = _get_bool(f"{proc_base}/rfiCorrectionFlag")
+        self.rfiMitigationMethod     = _get_text(f"{proc_base}/rfiMitigationMethod")
+        self.rfiMask                 = _get_text(f"{proc_base}/rfiMask")
+        self.rfiMaskGenerationMethod = _get_text(f"{proc_base}/rfiMaskGenerationMethod")
+
+        # NOTE:
+        # rfiFMChirpSource and rfiFMMitigationMethod are present only
+        # in newer STA monitoring products. Older products legitimately
+        # do not contain these tags -> keep None / NULL in DB.
+
+        self.rfiFMChirpSource        = _get_text(f"{proc_base}/rfiFMChirpSource")
+        self.rfiFMMitigationMethod   = _get_text(f"{proc_base}/rfiFMMitigationMethod")
+
+
+        # -------------------------
+        # Minimal validation (optional but recommended)
+        # -------------------------
+        if self.primaryImage is None or self.secondaryImage is None:
+            # In your XML they should always exist; if not, fail early.
+            raise ValueError(
+                f"Missing primaryImage/secondaryImage in annotation_coregistered XML: {xml_path}"
+            )
+            
+        # -------------------------
+        # RFI Mitigation reports (NEW)
+        # -------------------------
+        rfi_base = "./rfiMitigation"
+
+        self.rfiIsolatedFMReport = self._parse_rfi_report_list(
+            root,
+            f"{rfi_base}/rfiIsolatedFMReportList",
+            "rfiIsolatedFMReport")
+
+        self.rfiPersistentFMReport = self._parse_rfi_report_list(
+            root,
+            f"{rfi_base}/rfiPersistentFMReportList",
+            "rfiPersistentFMReport")    
+    
+    def load_mph(self):
+        """
+        Parse the MPH XML (root of the product) and extract:
+          - Acquisition parameters (eop:acquisitionParameters/bio:Acquisition)
+          - Processing information (eop:processing/bio:ProcessingInformation)
+     
+        The extracted values are stored as class attributes (self.*).
+        """
+        
+     
+        # Locate the main XML file if not already stored
+        if  self.mph is None:          
+            self.mph = next(Path(self.path).glob("*.xml"), None)
+     
+        if self.mph is None:
+            raise FileNotFoundError("MPH XML not found in product root.")
+     
+        # XML namespaces
+        ns = {
+            "bio": "http://earth.esa.int/biomass/1.0",
+            "eop": "http://www.opengis.net/eop/2.1",
+            "gml": "http://www.opengis.net/gml/3.2",
+            "om":  "http://www.opengis.net/om/2.0",
+            "ows": "http://www.opengis.net/ows/2.0",
+            "sar": "http://www.opengis.net/sar/2.1",
+            "xlink": "http://www.w3.org/1999/xlink",
+            "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        }
+     
+        # Helper to safely extract text and cast values
+        def _get_text(root, xpath, cast=str):
+            el = root.find(xpath, ns)
+            if el is None or el.text is None:
+                return None
+            txt = el.text.strip()
+            if cast is bool:
+                return txt.lower() == "true"
+            if cast is int:
+                try: return int(txt)
+                except ValueError: return None
+            if cast is float:
+                try: return float(txt)
+                except ValueError: return None
+            return txt
+     
+        # Parse the XML tree
+        tree = ET.parse(self.mph)
+        root = tree.getroot()
+     
+        # =========================
+        # Acquisition parameters
+        # =========================
+        base = ".//eop:acquisitionParameters/bio:Acquisition"
+     
+        self.orbitNumber       = _get_text(root, f"{base}/eop:orbitNumber", int)
+        self.lastOrbitNumber   = _get_text(root, f"{base}/eop:lastOrbitNumber", int)
+        self.orbitDirection    = _get_text(root, f"{base}/eop:orbitDirection", str)
+     
+        self.wrsLongitudeGrid  = _get_text(root, f"{base}/eop:wrsLongitudeGrid", int)
+        self.wrsLatitudeGrid   = _get_text(root, f"{base}/eop:wrsLatitudeGrid", int)
+     
+        self.ascendingNodeDate = _get_text(root, f"{base}/eop:ascendingNodeDate", str)
+        self.startTimeFromAscendingNode      = _get_text(root, f"{base}/eop:startTimeFromAscendingNode", int)
+        self.completionTimeFromAscendingNode = _get_text(root, f"{base}/eop:completionTimeFromAscendingNode", int)
+     
+        self.polarisationMode      = _get_text(root, f"{base}/sar:polarisationMode", str)
+        pol_channels               = _get_text(root, f"{base}/sar:polarisationChannels", str)
+        self.polarisationChannels  = [p.strip() for p in pol_channels.split(",")] if pol_channels else None
+        self.antennaLookDirection  = _get_text(root, f"{base}/sar:antennaLookDirection", str)
+     
+        self.missionPhase     = _get_text(root, f"{base}/bio:missionPhase", str)
+        self.instrumentConfID = _get_text(root, f"{base}/bio:instrumentConfID", int)
+        self.dataTakeID       = _get_text(root, f"{base}/bio:dataTakeID", int)
+        self.orbitDriftFlag   = _get_text(root, f"{base}/bio:orbitDriftFlag", bool)
+        self.globalCoverageID = _get_text(root, f"{base}/bio:globalCoverageID", str)
+        self.majorCycleID     = _get_text(root, f"{base}/bio:majorCycleID", str)
+        self.repeatCycleID    = _get_text(root, f"{base}/bio:repeatCycleID", str)
+        self.stackID          = _get_text(root, f"{base}/bio:stackID", str)
+     
+        # =========================
+        # Processing information
+        # =========================
+        pbase = ".//eop:processing/bio:ProcessingInformation"
+     
+        self.processingCenter           = _get_text(root, f"{pbase}/eop:processingCenter", str)
+        self.processingDate             = _get_text(root, f"{pbase}/eop:processingDate", str)
+        self.processorName              = _get_text(root, f"{pbase}/eop:processorName", str)
+        self.processorVersion           = _get_text(root, f"{pbase}/eop:processorVersion", str)
+        self.processingLevel            = _get_text(root, f"{pbase}/eop:processingLevel", str)
+        self.processingMode             = _get_text(root, f"{pbase}/eop:processingMode", str)
+        self.isCoregistrationPrimary    = _get_text(root,f"{pbase}/bio:isCoregistrationPrimary",bool)
+        
+        pbase = ".//eop:metaDataProperty/bio:EarthObservationMetaData"
+        self.stackmonitor    = _get_text(root,f"{pbase}/eop:identifier",str)
+        # =========================
+        # Center of footprint (gml:pos)
+        # =========================
+        # Esempio percorso:
+        # <eop:Footprint>
+        #   ...
+        #   <eop:centerOf>
+        #     <gml:Point ...>
+        #       <gml:pos>-21.093098 -56.583055</gml:pos>
+        #     </gml:Point>
+        #   </eop:centerOf>
+        # </eop:Footprint>
+
+        pos_txt = _get_text(root, ".//eop:Footprint/eop:centerOf/gml:Point/gml:pos", str)
+        self.center_lat = None
+        self.center_lon = None
+        self.center_latlon = None
+
+        if pos_txt:
+            # accetta "lat lon"
+            import re as _re
+            parts = [p for p in _re.split(r"[,\s]+", pos_txt.strip()) if p]
+            if len(parts) >= 2:
+                try:
+                    lat = float(parts[0])
+                    lon = float(parts[1])
+                    self.center_lat = lat
+                    self.center_lon = lon
+                    self.center_latlon = (lat, lon)
+                except ValueError:
+                    
+                    pass
+        """
+        Parse gml:posList and build a POLYGON WKT (EPSG:4326)
+        """
+        pos_el = root.find(".//eop:Footprint//gml:Polygon//gml:posList",ns)
+
+        if pos_el is None or pos_el.text is None:
+            self.poslist_wkt = None
+        else:
+            coords = pos_el.text.strip().split()
+
+            if len(coords) < 6:
+                self.poslist_wkt = None
+            else:
+                points = []
+                for i in range(0, len(coords), 2):
+                    lat = float(coords[i])
+                    lon = float(coords[i + 1])
+                    points.append(f"{lon} {lat}")  # lon lat for PostGIS
+        
+                # close polygon if needed
+                if points[0] != points[-1]:
+                    points.append(points[0])
+        
+                self.poslist_wkt = f"POLYGON(({', '.join(points)}))"
+        
+        # Repeated fields: collect as lists
+        self.auxiliaryDataSetFiles = [
+                e.text.strip() for e in root.findall(f"{pbase}/eop:auxiliaryDataSetFileName", ns)
+                if e is not None and e.text
+                ]
+        self.sourceProducts = [
+            e.text.strip() for e in root.findall(f"{pbase}/bio:sourceProduct", ns)
+            if e is not None and e.text
+        ]    
+            
+        
+    def get_nodata_value(self):
+        """
+        Extract the noDataValue from the annotation_coregistered_xml_file.
+    
+        Returns:
+            float: the noDataValue if found, otherwise None.
+        """
+        try:
+            tree = ET.parse(self.annotation_coregistered_xml_file)
+            root = tree.getroot()
+    
+            no_data_tag = root.find(".//sarImage/noDataValue")
+            if no_data_tag is not None:
+                return float(no_data_tag.text.strip())
+            else:
+                print("noDataValue tag not found in XML.")
+                return None
+        except Exception as e:
+            print(f"Error in get_nodata_value: {e}")
+            return None
+ 
+    
+
+    def load_lut_variables(self):
+        """
+        Load all LUT variables from the NetCDF file and store them as both attributes (self.<var>)
+        and in a dictionary (self.lut_variables) for easy access and inspection.
+        """
+        if not self.annotation_coregistered_lut_file:
+            raise FileNotFoundError("LUT NetCDF file path not set.")
+    
+        self.lut_variables = {}  # Initialize dictionary
+    
+        # Load root-level variables
+        try:
+            root_ds = xr.open_dataset(self.annotation_coregistered_lut_file)
+            for var in root_ds.variables:
+                self.lut_variables[var] = root_ds[var]
+                setattr(self, var, root_ds[var])
+                #print(f"✅ Loaded (root): self.{var}")
+        except Exception as e:
+            print(f"❌ Could not load root-level variables: {e}")
+    
+        # Expected groups based on provided dump
+        groups = [
+            "radiometry",
+            "denoising",
+            "geometry",
+            "coregistration",
+            "skpPhaseCalibration",
+            "baselineAndIonosphereCorrection"
+        ]
+    
+        for group in groups:
+            try:
+                ds = xr.open_dataset(self.annotation_coregistered_lut_file, group=group)
+                if not ds.variables:
+                    print(f"⚠️ Group '{group}' exists but has no variables.")
+                for var in ds.variables:
+                    full_var_name = f"{group}_{var}"
+                    self.lut_variables[full_var_name] = ds[var]
+                    setattr(self, full_var_name, ds[var])
+                    #print(f"✅ Loaded: self.{full_var_name}")
+            except OSError as e:
+                if "group not found" in str(e):
+                    print(f"❌ Group '{group}' not found.")
+                else:
+                    print(f"⚠️ Error loading group '{group}': {e}")
+            except Exception as e:
+                print(f"⚠️ Unexpected error loading group '{group}': {e}")
+        
+        print(" Done loading all available LUT variables.")
+               
+        
+    def check_lut_contents(self):
+        """
+        Check the LUT file and print available variables. Warn if expected variables are missing.
+        Uses group-aware inspection.
+        """
+        if not self.annotation_coregistered_lut_file:
+            raise FileNotFoundError("LUT NetCDF file not found.")
+    
+        expected_groups = {
+        "radiometry": [
+                        "sigmaNought", "gammaNought"
+                        ],
+        "denoising": [
+                        "denoisingHH", "denoisingXX", "denoisingVV"
+                        ],
+        "geometry": [
+                    "latitude", "longitude", "height", "incidenceAngle", "elevationAngle", "terrainSlope"
+                    ],
+        "coregistration": [
+                    "azimuthCoregistrationShifts", "rangeCoregistrationShifts",
+                    "coregistrationShiftsQuality", "flatteningPhaseScreen","waveNumbers"
+                    ],
+    "skpPhaseCalibration": [
+        "skpCalibrationPhaseScreen", "skpCalibrationPhaseScreenQuality"
+    ],
+    "baselineAndIonosphereCorrection": [
+        "baselineErrorPhaseScreen",
+        "residualIonospherePhaseScreen",
+        "residualIonospherePhaseScreenQuality"
+    ]
+            }
+
+        print("--- Checking LUT contents ---")
+        for group, variables in expected_groups.items():
+            try:
+                ds = xr.open_dataset(self.annotation_coregistered_lut_file, group=group)
+                for var in variables:
+                    if var in ds.variables:
+                        print(f"✔️ {group}/{var}")
+                    else:
+                        print(f"❌ MISSING: {group}/{var}")
+            except Exception as e:
+                for var in variables:
+                    print(f"❌ MISSING: {group}/{var} (group error: {e})")
+        print(' ')
+
+
+
+    def plot_lut_variable(self, variable_name, save_geotiff=False):
+        """
+        Plot a variable from the LUT file and optionally save it as a GeoTIFF.
+        Searches across all known groups.
+        """
+        if not self.annotation_coregistered_lut_file:
+            raise FileNotFoundError("LUT NetCDF file not found.")
+    
+        groups = [
+            "radiometry",
+            "denoising",
+            "geometry",
+            "coregistration",
+            "skpPhaseCalibration",
+            "baselineAndIonosphereCorrection"
+        ]
+    
+        var = None
+        found_group = None
+    
+        for group in groups:
+            try:
+                ds_group = xr.open_dataset(self.annotation_coregistered_lut_file, group=group)
+                if variable_name in ds_group:
+                    var = ds_group[variable_name]
+                    found_group = group
+                    break
+            except Exception:
+                continue
+    
+        if var is None:
+            raise KeyError(f"Variable '{variable_name}' not found in any known group.")
+    
+        data = var.values
+        # Maschera i valori nodata
+        data = np.ma.masked_equal(data, -9999)
+        
+        plt.figure(figsize=(8, 6))
+        plt.imshow(data, cmap="RdYlBu")
+        plt.colorbar(label=f"{found_group}/{variable_name}")
+        plt.title(f"{variable_name} from group '{found_group}'")
+        plt.tight_layout()
+        plt.show()
+    
+        if save_geotiff:
+            try:
+                lat_ds = xr.open_dataset(self.annotation_coregistered_lut_file, group="geometry")
+                lats = lat_ds["latitude"].values
+                lons = lat_ds["longitude"].values
+    
+                transform = from_origin(
+                    np.min(lons),
+                    np.max(lats),
+                    abs(lons[0, 1] - lons[0, 0]),
+                    abs(lats[1, 0] - lats[0, 0])
+                )
+    
+                with rasterio.open(
+                    f"{variable_name.replace('/', '_')}.tif",
+                    'w',
+                    driver='GTiff',
+                    height=data.shape[0],
+                    width=data.shape[1],
+                    count=1,
+                    dtype=data.dtype,
+                    crs='EPSG:4326',
+                    transform=transform
+                ) as dst:
+                    dst.write(data, 1)
+    
+                print(f"✅ Saved {variable_name} as GeoTIFF.")
+            except Exception as e:
+                print(f"⚠️ Failed to save GeoTIFF: {e}")
+
 
 
 # test
