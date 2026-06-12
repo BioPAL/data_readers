@@ -1306,7 +1306,21 @@ class BiomassProductSTA:
         self.rfiFMChirpSource        = _get_text(f"{proc_base}/rfiFMChirpSource")
         self.rfiFMMitigationMethod   = _get_text(f"{proc_base}/rfiFMMitigationMethod")
         
-        
+        # -------------------------
+        # STA InSAR parameters (PFD v1.6.1, Sec 6.3.3.3)
+        # -------------------------
+        sta_insar = "./staInSARParameters"
+
+        self.calibrationPrimaryImage                       = _get_text(f"{sta_insar}/calibrationPrimaryImage")
+        self.azimuthCommonBandwidth                        = _get_float(f"{sta_insar}/azimuthCommonBandwidth")
+        self.azimuthCentralFrequency                       = _get_float(f"{sta_insar}/azimuthCentralFrequency")
+        self.multiSquintCalibrationCoherenceCheckValue     = _get_float(f"{sta_insar}/multiSquintCalibrationCoherenceCheckValue")
+        self.multiSquintCalibrationIonosphereCorrectionFlag = _get_bool(f"{sta_insar}/multiSquintCalibrationIonosphereCorrectionFlag")
+        self.multiSquintCalibrationLowResolutionFlag       = _get_bool(f"{sta_insar}/multiSquintCalibrationLowResolutionFlag")
+        self.multiSquintCalibrationAzimuthShift            = _get_float(f"{sta_insar}/multiSquintCalibrationAzimuthShift")
+        self.multiSquintCalibrationAzimuthFrequencyCentroid = _get_float(f"{sta_insar}/multiSquintCalibrationAzimuthFrequencyCentroid")
+        self.multiSquintCalibrationRangePhaseSlope         = _get_float(f"{sta_insar}/multiSquintCalibrationRangePhaseSlope")
+        self.multiSquintCalibrationAzimuthPhaseSlope       = _get_float(f"{sta_insar}/multiSquintCalibrationAzimuthPhaseSlope")
 
 
         # -------------------------

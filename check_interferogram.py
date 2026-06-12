@@ -10,10 +10,12 @@ import netCDF4
 import numpy as np
 import numpy.typing as npt
 import scipy
+import sys
 from PIL import Image
 from pathlib import Path
 import os
 from matplotlib.ticker import FormatStrFormatter, MaxNLocator
+import re
 import glob
 import pprint
 from reportlab.lib.styles import ParagraphStyle
@@ -31,18 +33,16 @@ import argparse
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 import shutil
-import scipy as sp
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FormatStrFormatter
-from scipy.signal import convolve2d
+import subprocess
+
 
 
 # --- COHERENCE COLOR THRESHOLD CONFIGURATION ---
 COH_LOW_THRESHOLD  = 0.35   
 COH_HIGH_THRESHOLD = 0.80
 
-
-
+import psycopg2
+import psycopg2.extras
 
 # --- CRITICAL BASELINE (meters) ---
 BC_BY_MISSION_PHASE = {
@@ -173,7 +173,10 @@ def generate_interferogram_pdf_report(
     
         # Caso 2: valore scalare
         else:
-            v_fmt = format_value(v, ndigits=4)
+            try:
+                v_fmt = f"{float(v):.4f}"
+            except Exception:
+                v_fmt = str(v)
     
         table_data.append([
             Paragraph(str(k), param_style),
@@ -308,42 +311,7 @@ def save_clean_image(data, cmap='RdBu', out_path=None, vmin=None, vmax=None):
     fig.savefig(out_path, bbox_inches='tight', pad_inches=0, dpi=300)
     plt.close(fig)
 
-def format_value(v, ndigits=4):
-    # None / vuoti
-    if v is None:
-        return ""
 
-    # numpy scalari -> python scalari
-    if isinstance(v, (np.generic,)):
-        v = v.item()
-
-    # bool
-    if isinstance(v, bool):
-        return "true" if v else "false"
-
-    # int
-    if isinstance(v, int):
-        return str(v)
-
-    # float
-    if isinstance(v, float):
-        if np.isfinite(v) and float(v).is_integer():
-            return str(int(v))
-        return f"{v:.{ndigits}f}"
-
-    # stringhe: prova a capire se sono numeri
-    if isinstance(v, str):
-        s = v.strip()
-        try:
-            fv = float(s)
-            if np.isfinite(fv) and fv.is_integer():
-                return str(int(fv))
-            return f"{fv:.{ndigits}f}"
-        except Exception:
-            return s
-
-    # fallback
-    return str(v)
 
 def save_colorbar_png(out_path,
                       cmap='viridis',
@@ -522,11 +490,14 @@ def make_overlay_kmz_with_quad(
         nonlocal desc_html
         if not items_dict:
             return
-        
+
         desc_html += f"<h4 style='color:#1f5f3a'>{title}</h4>"
         desc_html += "<table class='kml-table'>"
         for k, v in items_dict.items():
-            v_fmt = format_value(v, ndigits=4)
+            try:
+                v_fmt = f"{float(v):.4f}"
+            except Exception:
+                v_fmt = str(v)
             desc_html += f"<tr><td><b>{k}</b></td><td>{v_fmt}</td></tr>"
         desc_html += "</table>"
 
@@ -849,6 +820,7 @@ def plot_2d(x, y, zplot, cb='rainbow', fs=12,
     del fig, im
     return
 
+
 def plot_2d_with_hist(
     x, y, zplot,
     cb='rainbow', fs=12,
@@ -996,153 +968,7 @@ def plot_2d_with_hist(
 
 
 
-
-def plot_2d_with_hist_old(
-    x, y, zplot,
-    cb='rainbow', fs=12,
-    vmin=None, vmax=None,
-    title='',
-    y_title='', x_title='', cb_title='',
-    y_axis_format='%.0f', x_axis_format='%.1f',
-    cb_orientation='vertical',
-    no_interp=False, origin='lower',
-    nocolorbar=False, dpi=150,
-    mask_color='black',
-    height_compression=0.1,
-    nodata=None,
-    show=False,
-    file_2_save=None
-):
-
-
-    # ------------------------------------------------------------------
-    # 1) NORMALIZE INPUT (ONE SINGLE SOURCE OF TRUTH)
-    # ------------------------------------------------------------------
-    if isinstance(zplot, np.ma.MaskedArray):
-        data = zplot.filled(np.nan)
-    else:
-        data = np.array(zplot, dtype=np.float64, copy=True)
-
-    if nodata is not None:
-        data[data == nodata] = np.nan
-
-    # ------------------------------------------------------------------
-    # 2) AUTO RANGE (ROBUST, NODATA SAFE)
-    # ------------------------------------------------------------------
-    if vmin is None or vmax is None:
-        finite_vals = data[np.isfinite(data)]
-        if finite_vals.size == 0:
-            raise ValueError("No valid data available after nodata masking")
-
-        if vmin is None:
-            vmin = np.nanmean(finite_vals) - 3 * np.nanstd(finite_vals)
-        if vmax is None:
-            vmax = np.nanmean(finite_vals) + 3 * np.nanstd(finite_vals)
-
-    # ------------------------------------------------------------------
-    # 3) FIGURE LAYOUT
-    # ------------------------------------------------------------------
-    fig, ax = plt.subplots(
-        1, 2,
-        figsize=(14, 7),
-        gridspec_kw={'width_ratios': [2.3, 1]}
-    )
-    ax_map, ax_hist = ax
-
-    # ------------------------------------------------------------------
-    # 4) COLORMAP
-    # ------------------------------------------------------------------
-    current_cmap = plt.colormaps[cb].copy()
-    current_cmap.set_bad(color=mask_color)
-
-    # ------------------------------------------------------------------
-    # 5) EXTENT & ASPECT RATIO
-    # ------------------------------------------------------------------
-    if origin == "lower":
-        extent = [y.min(), y.max(), x.min(), x.max()]
-    else:
-        extent = [y.min(), y.max(), x.max(), x.min()]
-
-    H, W = data.shape
-    natural_aspect = H / W
-    aspect_ratio = natural_aspect * height_compression
-
-    # ------------------------------------------------------------------
-    # 6) PREPARE MAP DATA
-    # ------------------------------------------------------------------
-    data_plot = np.flip(data, axis=0) if x[0] > x[-1] else data
-    data_plot = np.ma.masked_invalid(data_plot)
-
-    interp_opt = 'none' if no_interp else 'bilinear'
-
-    # ------------------------------------------------------------------
-    # 7) MAP
-    # ------------------------------------------------------------------
-    im = ax_map.imshow(
-        data_plot,
-        origin=origin,
-        extent=extent,
-        cmap=current_cmap,
-        vmin=vmin,
-        vmax=vmax,
-        interpolation=interp_opt,
-        aspect=aspect_ratio
-    )
-
-    ax_map.set_title(title, fontsize=fs)
-    ax_map.set_xlabel(y_title, fontsize=fs)
-    ax_map.set_ylabel(x_title, fontsize=fs)
-    ax_map.xaxis.set_major_formatter(FormatStrFormatter(x_axis_format))
-    ax_map.yaxis.set_major_formatter(FormatStrFormatter(y_axis_format))
-
-    if not nocolorbar:
-        cb_obj = fig.colorbar(im, ax=ax_map, orientation=cb_orientation)
-        cb_obj.set_label(cb_title, fontsize=fs)
-
-    # ------------------------------------------------------------------
-    # 8) HISTOGRAM + STATISTICS (NODATA SAFE)
-    # ------------------------------------------------------------------
-    vals = data[np.isfinite(data)]
-
-    ax_hist.hist(vals, bins=300, color="steelblue", edgecolor="blue")
-    ax_hist.grid(True)
-    ax_hist.set_title(f"{title} histogram", fontsize=fs)
-    ax_hist.set_xlabel("Value")
-    ax_hist.set_ylabel("Count")
-
-    stats_txt = (
-        f"count:  {vals.size}\n"
-        f"min:    {np.min(vals):.3f}\n"
-        f"max:    {np.max(vals):.3f}\n"
-        f"mean:   {np.mean(vals):.3f}\n"
-        f"median: {np.median(vals):.3f}\n"
-        f"std:    {np.std(vals):.3f}"
-    )
-
-    ax_hist.text(
-        0.98, 0.95,
-        stats_txt,
-        ha="right", va="top",
-        transform=ax_hist.transAxes,
-        fontsize=fs,
-        bbox=dict(facecolor="white", alpha=0.8)
-    )
-
-    # ------------------------------------------------------------------
-    # 9) SAVE / SHOW
-    # ------------------------------------------------------------------
-    fig.tight_layout()
-
-    if file_2_save:
-        fig.savefig(file_2_save, dpi=dpi, bbox_inches="tight")
-        plt.close(fig)
-
-    if show:
-        plt.show()
-
-
-
-def single_baseline_single_pol_coh_old(primary_complex: npt.NDArray[complex],
+def single_baseline_single_pol_coh(primary_complex: npt.NDArray[complex],
                                    secondary_complex: npt.NDArray[complex],
                                    avg_kernel_shape: tuple[int, ...],
                                    ) -> npt.NDArray[complex]:
@@ -1203,74 +1029,7 @@ def single_baseline_single_pol_coh_old(primary_complex: npt.NDArray[complex],
 
     return coherence
 
-def single_baseline_single_pol_coh(
-    slc_primary: np.ndarray,
-    slc_secondary: np.ndarray,
-    window: tuple[int, int] = (5, 5),
-    valid_mask: np.ndarray | None = None,
-    min_valid_frac: float = 0.8
-):
 
-    wy, wx = window
-    kernel = np.ones((wy, wx), dtype=float)
-    win_area = wy * wx
-
-    # ------------------------------------------------------------
-    # 0) Valid mask
-    # ------------------------------------------------------------
-    if valid_mask is None:
-        valid_mask = np.ones(slc_primary.shape, dtype=bool)
-
-    valid_mask = valid_mask.astype(float)
-
-    # ------------------------------------------------------------
-    # 1) Zero-out invalid samples
-    # ------------------------------------------------------------
-    p = slc_primary.copy()
-    s = slc_secondary.copy()
-
-    p[~valid_mask.astype(bool)] = 0.0
-    s[~valid_mask.astype(bool)] = 0.0
-
-    # ------------------------------------------------------------
-    # 2) Core interferometric products
-    # ------------------------------------------------------------
-    num = p * np.conj(s)
-    den_p = np.abs(p) ** 2
-    den_s = np.abs(s) ** 2
-
-    # ------------------------------------------------------------
-    # 3) Convolutions (only valid samples contribute)
-    # ------------------------------------------------------------
-    num_f = convolve2d(num, kernel, mode="same", boundary="fill", fillvalue=0.0)
-    den_p_f = convolve2d(den_p, kernel, mode="same", boundary="fill", fillvalue=0.0)
-    den_s_f = convolve2d(den_s, kernel, mode="same", boundary="fill", fillvalue=0.0)
-
-    # Count valid samples per window
-    n_valid = convolve2d(valid_mask, kernel, mode="same", boundary="fill", fillvalue=0.0)
-
-    # ------------------------------------------------------------
-    # 4) Coherence
-    # ------------------------------------------------------------
-    denom = np.sqrt(den_p_f * den_s_f)
-    coh = np.zeros_like(num_f, dtype=np.complex128)
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        coh = num_f / denom
-
-    coh_abs = np.abs(coh)
-    coh_phase = np.angle(coh)
-
-    # ------------------------------------------------------------
-    # 5) Enforce window validity criterion
-    # ------------------------------------------------------------
-    min_valid = min_valid_frac * win_area
-    valid_coh = n_valid >= min_valid
-
-    coh_abs[~valid_coh] = np.nan
-    coh_phase[~valid_coh] = np.nan
-
-    return coh_abs, coh_phase
 
 def extract_date_from_sta_name(sta_path):
     """
@@ -1323,7 +1082,85 @@ def save_phase_map_lut(arr: np.ndarray,
     plt.close(fig)
     print(f"[INFO] Image saved to: {out_file}")
      
-    
+def save_phase_map_with_contours(arr: np.ndarray,
+                                  title: str,
+                                  out_file: Path,
+                                  cmap: str = "rainbow",
+                                  n_contours: int = 15,
+                                  nodata: float = -9999.0,
+                                  aspect_ratio: float = 0.2,
+                                  fontsize: int = 6) -> None:
+    """
+    Saves a phase map PNG with contour lines overlaid.
+    Useful to visually measure the smoothing of the SKP phase screen.
+
+    Parameters
+    ----------
+    arr         : 2D array (radians)
+    title       : plot title
+    out_file    : output PNG path
+    cmap        : colormap
+    n_contours  : number of contour levels (more = finer smoothing detail)
+    nodata      : nodata sentinel value
+    aspect_ratio: imshow aspect ratio (keep consistent with other maps)
+    fontsize    : title/label font size
+    """
+    data = np.ma.masked_equal(arr, nodata)
+    data = np.ma.masked_invalid(data)
+
+    valid = data.compressed()
+    if valid.size == 0:
+        print(f"[WARN] No valid values for contour map: {out_file.name}")
+        return
+
+    vmin = np.percentile(valid, 2)
+    vmax = np.percentile(valid, 98)
+
+    # Contour levels equally spaced between vmin and vmax
+    levels = np.linspace(vmin, vmax, n_contours)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Background: filled color map
+    im = ax.imshow(
+        data,
+        cmap=cmap,
+        aspect=aspect_ratio,
+        interpolation="bilinear",   # smooth background helps read the contours
+        vmin=vmin,
+        vmax=vmax,
+        origin="upper"
+    )
+
+    # Contour lines
+    # imshow and contour use different coordinate systems:
+    # contour works on row/col indices directly
+    rows = np.arange(data.shape[0])
+    cols = np.arange(data.shape[1])
+
+    # contour needs a plain ndarray, not a masked array, with NaN for masked
+    data_cont = data.filled(np.nan)
+
+    cs = ax.contour(
+        cols, rows, data_cont,
+        levels=levels,
+        colors="white",      
+        linewidths=0.3,
+        alpha=0.9
+    )
+
+    cb = fig.colorbar(im, ax=ax, orientation="vertical", fraction=0.02, pad=0.03)
+    cb.set_label("[rad]", fontsize=fontsize)
+
+    ax.set_title(title, fontsize=fontsize)
+    ax.set_xlabel("Range [pixels]", fontsize=fontsize)
+    ax.set_ylabel("Azimuth [pixels]", fontsize=fontsize)
+    ax.tick_params(labelsize=fontsize)
+
+    fig.tight_layout()
+    fig.savefig(out_file, dpi=400, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[INFO] Contour map saved: {out_file}")    
         
 def save_phase_map_slc(arr: np.ndarray,
                        title: str, date: str, out_file: Path,
@@ -1337,8 +1174,8 @@ def save_phase_map_slc(arr: np.ndarray,
     if valid.size == 0:
         print(f"[WARN] No valid values to plot for {out_file}")
         return
-    vmin = np.nanpercentile(valid, 2)
-    vmax = np.nanpercentile(valid, 98)
+    vmin = np.percentile(valid, 2)
+    vmax = np.percentile(valid, 98)
     nan_value = 255
     std_multiplier = 3
     aspect_ratio =0.2
@@ -1438,7 +1275,6 @@ def get_info_baseline(product_primary, product_secondary,listinfobaseline):
         "startTimeFromAscendingNode_primary":         product_primary.startTimeFromAscendingNode,#getattr(product_primary, "startTimeFromAscendingNode", ""),
         "completionTimeFromAscendingNode_primary":    product_primary.completionTimeFromAscendingNode,#getattr(product_primary, "completionTimeFromAscendingNode", ""),
         "dataTakeID_primary":                         int(product_primary.dataTakeID),#getattr(product_primary, "dataTakeID", ""),
-        "overallProductQualityIndex_STA_primary" :      product_primary.overallProductQualityIndex
     }
     
     annotation_file_sec = product_secondary.annotation_coregistered_xml_file
@@ -1481,7 +1317,11 @@ def get_info_baseline(product_primary, product_secondary,listinfobaseline):
         "rfiMitigationMethod_secondary":              product_secondary.rfiMitigationMethod,
         "rfiMask_secondary"   :                       product_secondary.rfiMask,
         "rfiMaskGenerationMethod_secondary" :         product_secondary.rfiMaskGenerationMethod,
-        "overallProductQualityIndex_STA_secondary" :      product_secondary.overallProductQualityIndex
+        "multiSquintCalibrationFlag_secondary":                 product_secondary.multiSquintCalibrationFlag,
+        "multiSquintCalibrationCoherenceImprovementThreshold_secondary": product_secondary.multiSquintCalibrationCoherenceImprovementThreshold,
+        "multiSquintCalibrationCoherenceCheckValue_secondary":  product_secondary.multiSquintCalibrationCoherenceCheckValue,
+        "multiSquintCalibrationIonosphereCorrectionFlag_secondary": product_secondary.multiSquintCalibrationIonosphereCorrectionFlag,
+        "multiSquintCalibrationLowResolutionFlag_secondary":    product_secondary.multiSquintCalibrationLowResolutionFlag
    }        
     
     
@@ -1583,7 +1423,9 @@ def save_tiff_with_gcps( out_path, array, ref_tiff, dtype=gdal.GDT_Float32):
 
 def write_interferogram_annotation_xml(out_dir: Path,product_name: str, global_info: dict, pol_plots: dict, ref_pol: str):
     
-
+    """
+    Create an ESA-style annotation XML for the interferogram product.
+    """
 
     out_dir = Path(out_dir)
     out_dir.mkdir(exist_ok=True)
@@ -1648,66 +1490,8 @@ def write_interferogram_annotation_xml(out_dir: Path,product_name: str, global_i
     tree.write(out_xml, encoding="utf-8", xml_declaration=True)
 
     print(f"[OK] Annotation XML written: {out_xml}")
-    
-    
-def build_safe_spline(field_in: np.ndarray,
-                      axes_in: tuple[np.ndarray, np.ndarray],
-                      bbox,
-                      kx=1, ky=1, s=0.0, nodata=-9999.0):
-    """
-    Build a RectBivariateSpline that is robust to NaNs.
-    Returns: interpolator, validity_mask (boolean)
-    """
-    field = np.asarray(field_in, dtype=np.float64)
 
-    mask = ~np.isfinite(field)| (field == nodata)
-    if mask.all():
-        raise ValueError("Input field contains only NaNs — spline interpolation impossible.")
 
-    mean_val = np.nanmean(field)
-    field_filled = field.copy()
-    field_filled[mask] = mean_val
-     
-    spline = sp.interpolate.RectBivariateSpline(
-        axes_in[0],
-        axes_in[1],
-        field_filled,
-        bbox=bbox,
-        kx=kx,
-        ky=ky,
-        s=s
-    )
-
-    # interpolator for the mask (1 = valid, 0 = invalid)
-    mask_interp = sp.interpolate.RectBivariateSpline(
-        axes_in[0],
-        axes_in[1],
-        (~mask).astype(float),
-        kx=1,
-        ky=1,
-        s=0.0
-    )
-
-    return spline, mask_interp
-
-def canonical_pol_name(pol: str) -> str:
-    """
-    Map raw polarization names to canonical output names.
-
-    HV / VH  -> XP
-    HH, VV   -> unchanged
-    """
-    pol = pol.upper()
-    if pol in ("HV", "VH"):
-        return "XP"
-    return pol
-
-def quick_stats(name, arr):
-        print(f"{name}:")
-        print("  shape =", arr.shape)
-        print("  min   =", np.nanmin(arr))
-        print("  max   =", np.nanmax(arr))
-        print()
 
 def check_interferogram(path_primary, path_secondary, flatten, is_light, number_frame,coh_low_thr, coh_high_thr ,
                         skpPhaseCalibrationFlag,skpPhaseCorrectionFlag, skpPhaseCorrectionFlatteningOnlyFlag, polarizations_requested ):
@@ -1791,7 +1575,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     # Read STA primary measurement structural info
     # --------------------------------------------------
     sta_info = read_sta_primary_measurement_info(data_primary_abs)
-    nodata = float(sta_info['nodata'])
+    
     print("[INFO] STA primary measurement info:")
     print(f"  Polarizations: {sta_info['polarizations']}")
     print(f"  NoData value: {sta_info['nodata']}")
@@ -1946,52 +1730,46 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
                 max(np.min(axes_in[1]), np.min(axes_out[1])),
                 max(np.max(axes_in[1]), np.max(axes_out[1])),
             ]
-
-    # -------------------------------
-    # Coregistered flattening screen
-    # -------------------------------
-    fps_co = flatteningPhaseScreen_co.values if hasattr(flatteningPhaseScreen_co, "values") else flatteningPhaseScreen_co    
-    fps_co_spline, fps_co_mask_interp = build_safe_spline(fps_co,axes_in,bbox=bbox, kx=degree_x,ky=degree_y,s=smoother,nodata=nodata)   
-    flatteningPhaseScreen_co_upsampled = fps_co_spline(axes_out[0], axes_out[1])    
-    validity_co = fps_co_mask_interp(axes_out[0], axes_out[1])
-    flatteningPhaseScreen_co_upsampled[validity_co < 0.5] = np.nan
     
+    flatteningPhaseScreen_co_interpolator = scipy.interpolate.RectBivariateSpline(    
+            axes_in[0],
+            axes_in[1],
+            flatteningPhaseScreen_co,
+            bbox= bbox,
+        kx=degree_x,
+            ky=degree_y,
+            s=smoother
+         )
     
-    # -------------------------
-    # Primary flattening screen
-    # -------------------------
-    fps_pri = flatteningPhaseScreen_pri.values if hasattr(flatteningPhaseScreen_pri, "values") else flatteningPhaseScreen_pri    
-    fps_pri_spline, fps_pri_mask_interp = build_safe_spline(fps_pri,axes_in, bbox=bbox, kx=degree_x, ky=degree_y,s=smoother, nodata=nodata)    
-    flatteningPhaseScreen_pri_upsampled = fps_pri_spline(axes_out[0], axes_out[1])    
-    validity_pri = fps_pri_mask_interp(axes_out[0], axes_out[1])
-    
-    # Keep only pixels where the interpolated validity is sufficiently high:
-    # validity >= 0.5  -> accept the interpolated value as reliable
-    # validity <  0.5  -> consider the value unreliable and mask it as NaN
-    flatteningPhaseScreen_pri_upsampled[validity_pri < 0.5] = np.nan
-    
+    flatteningPhaseScreen_pri_interpolator = scipy.interpolate.RectBivariateSpline(    
+            axes_in[0],
+            axes_in[1],
+            flatteningPhaseScreen_pri,
+            bbox= bbox,
+        kx=degree_x,
+            ky=degree_y,
+            s=smoother
+         )
     
 
     
-    quick_stats("flatteningPhaseScreen_co", fps_co)
-    quick_stats("flatteningPhaseScreen_co_upsampled", flatteningPhaseScreen_co_upsampled)
+    flatteningPhaseScreen_co_upsampled = flatteningPhaseScreen_co_interpolator(axes_out[0], axes_out[1])
+    flatteningPhaseScreen_pri_upsampled = flatteningPhaseScreen_pri_interpolator(axes_out[0], axes_out[1])
     
-    quick_stats("flatteningPhaseScreen_pri", fps_pri)
-    quick_stats("flatteningPhaseScreen_pri_upsampled", flatteningPhaseScreen_pri_upsampled)
 
     # --- upsample SKP come exp(j·skp) ---
     skpCalibrationPhaseScreen_co_upsampled = upsample_phase_via_complex(
         skpCalibrationPhaseScreen_co,
         axes_in=(lut_az_axes_pri, lut_range_axis_pri),
         axes_out=(az_slc_axis_pri_stac, range_slc_axis_pri_stac),
-        bbox=bbox, kx=degree_x, ky=degree_y, s=smoother, nodata=nodata
+        bbox=bbox, kx=degree_x, ky=degree_y, s=smoother, nodata=-9999.0
         )
 
     skpCalibrationPhaseScreen_pri_upsampled = upsample_phase_via_complex(
         skpCalibrationPhaseScreen_pri,
         axes_in=(lut_az_axes_pri, lut_range_axis_pri),
         axes_out=(az_slc_axis_pri_stac, range_slc_axis_pri_stac),
-        bbox=bbox, kx=degree_x, ky=degree_y, s=smoother, nodata=nodata
+        bbox=bbox, kx=degree_x, ky=degree_y, s=smoother, nodata=-9999.0
         )
     
     
@@ -2009,18 +1787,21 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
                        preview_dir / f"skpCalibrationPhaseScreen_co_upsampled_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png")
     
     
-    vmin = np.nanpercentile(flatteningPhaseScreen_co_upsampled, 2)
-    vmax = np.nanpercentile(flatteningPhaseScreen_co_upsampled, 98)
-    
+    nodata=float(-9999.0)
+    vals = flatteningPhaseScreen_co_upsampled[
+            np.isfinite(flatteningPhaseScreen_co_upsampled) &
+            (flatteningPhaseScreen_co_upsampled != nodata)]
+
+    vmin = np.percentile(vals, 2)
+    vmax = np.percentile(vals, 98)
     flatteningPhaseScreen_co_upsampled = np.ma.masked_equal(flatteningPhaseScreen_co_upsampled.astype(np.float64), nodata)
-    
-    
     plot_2d_with_hist(
     x=np.arange(flatteningPhaseScreen_co_upsampled.shape[0]),
     y=np.arange(flatteningPhaseScreen_co_upsampled.shape[1]),
     zplot=flatteningPhaseScreen_co_upsampled,   # oppure phase_deg
     cb='rainbow',
-    vmin=vmin, vmax=vmax,             # se rad
+    vmin=-vmin, vmax=vmax,             # se rad
+    # vmin=-180, vmax=180,               # se deg
     title=f"flatteningPhaseScreen\nco_upsampled [rad] - {date_secondary}",
     x_title="Azimuth [pixels]",
     y_title="Range [pixels]",
@@ -2032,17 +1813,19 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     ) 
     
 
-    vmin = np.nanpercentile(flatteningPhaseScreen_pri_upsampled, 2)
-    vmax = np.nanpercentile(flatteningPhaseScreen_pri_upsampled, 98)
-    
-    
+    vals = flatteningPhaseScreen_pri_upsampled[
+            np.isfinite(flatteningPhaseScreen_pri_upsampled) &
+            (flatteningPhaseScreen_pri_upsampled != nodata)]
+
+    vmin = np.percentile(vals, 2)
+    vmax = np.percentile(vals, 98)
     flatteningPhaseScreen_pri_upsampled = np.ma.masked_equal(flatteningPhaseScreen_pri_upsampled.astype(np.float64), nodata)    
     plot_2d_with_hist(
     x=np.arange(flatteningPhaseScreen_pri_upsampled.shape[0]),
     y=np.arange(flatteningPhaseScreen_pri_upsampled.shape[1]),
     zplot=flatteningPhaseScreen_pri_upsampled,   # oppure phase_deg
     cb='rainbow',
-    vmin=vmin, vmax=vmax,            
+    vmin=-vmin, vmax=vmax,            
     title= f"flatteningPhaseScreen\npri_upsampled [rad] - {date_primary}",
     x_title="Azimuth [pixels]",
     y_title="Range [pixels]",
@@ -2071,6 +1854,19 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         f"skpCalibrationPhaseScreen_co_upsampled_panel_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png",
     show=False
     ) 
+    
+    # --- SKP co_upsampled: contour map for smoothing inspection ---
+    save_phase_map_with_contours(
+        skpCalibrationPhaseScreen_co_upsampled,
+        title=f"SKP Calibration Phase Co_upsampled [rad] - contours - {date_secondary}",
+        out_file=preview_dir /
+            f"skpCalibrationPhaseScreen_co_upsampled_contour_{date_primary}_{date_secondary}_{number_frame}_{flatten}.png",
+        n_contours=15,      
+        nodata=-9999.0,
+    )
+    
+    
+    
     
     
     plot_2d_with_hist(
@@ -2109,7 +1905,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         # processor did NOT apply any screen -> we must compensate (flattening + skp)
         corr_pri = flatteningPhaseScreen_pri_upsampled + skpCalibrationPhaseScreen_pri_upsampled
         corr_co  = flatteningPhaseScreen_co_upsampled  + skpCalibrationPhaseScreen_co_upsampled
-        
+        phase_correction_applied = "None -> applying (flattening + SKP)"
         print("[INFO] phaseCorrection: None -> applying (flattening + skp)")
         
     elif flatten == "geometry":
@@ -2117,13 +1913,14 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         corr_pri = skpCalibrationPhaseScreen_pri_upsampled
         corr_co  = skpCalibrationPhaseScreen_co_upsampled
         
-        
+        phase_correction_applied = "Geometry -> applying SKP only"
         print("[INFO] phaseCorrection: Flattening-only -> applying SKP only")
         
     elif flatten == "skp":
         # processor applied the full screen -> no correction here
         corr_pri = 0.0
         corr_co  = 0.0
+        phase_correction_applied = "SKP (full) -> no additional correction"
         print("[INFO] phaseCorrection: Ground Phase (full) -> no additional correction")
     else:
         raise ValueError(f"Unknown flatten option: {flatten}")    
@@ -2142,20 +1939,17 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     preview_pol_dirs = {}
        
     pol_plots = {}    
-    for pol_raw in polarizations:
-        
-        pol_out = canonical_pol_name(pol_raw)
-        pol_dir = preview_dir / pol_out
+    for pol in polarizations:
+        pol_dir = preview_dir / pol
         pol_dir.mkdir(exist_ok=True)
-        preview_pol_dirs[pol_out] = pol_dir
-        print(f"[INFO] Preview folder for {pol_out}: {pol_dir}")
-        pol_plots[pol_out] = {}
-        pol_plots[pol_out]["plots"] = {}
-        pol_plots[pol_out]["stats"] = {}
-        channel = pol_to_band_index[pol_raw]   
-        print(f"\n[INFO] Processing polarization {pol_out} (band {channel})")
-        
-       
+        preview_pol_dirs[pol] = pol_dir
+        print(f"[INFO] Preview folder for {pol}: {pol_dir}")
+        pol_plots[pol] = {}
+        pol_plots[pol]["plots"] = {}
+        pol_plots[pol]["stats"] = {}
+        channel = pol_to_band_index[pol]   
+        print(f"\n[INFO] Processing polarization {pol} (band {channel})")
+
         # -------------------------
         # Load PRIMARY SLC
         # -------------------------
@@ -2177,35 +1971,21 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
         with rasterio.open(data_secondary_phase) as ds:
             phase_sec = ds.read(channel)
             phase_sec = np.ma.masked_equal(phase_sec, nan_value)
-            
-            
-            
-        valid_pri = np.isfinite(amp_pri) & np.isfinite(phase_pri)
-        valid_pri &= (amp_pri != nan_value) & (phase_pri != nan_value)
-        
-        valid_sec = np.isfinite(amp_sec) & np.isfinite(phase_sec)
-        valid_sec &= (amp_sec != nan_value) & (phase_sec != nan_value)
-        
-        valid_slc = valid_pri & valid_sec   # pixel validi in entrambe
     
         # -------------------------
         # Build complex images
         # -------------------------
-        
         primary   = (amp_pri * np.exp(1j * phase_pri)).astype(np.complex64)
         secondary = (amp_sec * np.exp(1j * phase_sec)).astype(np.complex64)
-        
-        primary[~valid_slc] = np.nan + 1j*np.nan
-        secondary[~valid_slc] = np.nan + 1j*np.nan
         
         # -------------------------
         # Debug stats
         # -------------------------
-        print(f"[INFO] PRIMARY ({pol_raw})")
+        print(f"[INFO] PRIMARY ({pol})")
         print(f"  - Max amplitude: {np.nanmax(amp_pri)}")
         print(f"  - Max phase:     {np.nanmax(phase_pri)}")
     
-        print(f"[INFO] SECONDARY ({pol_raw})")
+        print(f"[INFO] SECONDARY ({pol})")
         print(f"  - Max amplitude: {np.nanmax(amp_sec)}")
         print(f"  - Max phase:     {np.nanmax(phase_sec)}")
         
@@ -2241,10 +2021,10 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             cb_title='[deg]',
             height_compression=0.01,
             file_2_save=pol_dir /
-                f"interferogram_phase_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png",
+                f"interferogram_phase_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png",
             show=False
         )
-        pol_plots[pol_out]["plots"]["interferogram_phase"] = (pol_dir /f"interferogram_phase_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png")            
+        pol_plots[pol]["plots"]["interferogram_phase"] = (pol_dir /f"interferogram_phase_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png")            
         # --------------------------------------------
         # Phase after flattening with histogram
         # --------------------------------------------
@@ -2261,62 +2041,61 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             cb_title='[deg]',
             height_compression=0.01,
             file_2_save=pol_dir /
-                f"interferogram_phase_flat_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png",
+                f"interferogram_phase_flat_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png",
             show=False
            )
-        pol_plots[pol_out]["plots"]["interferogram_phase_flat"] = (pol_dir /f"interferogram_phase_flat_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png")            
+        pol_plots[pol]["plots"]["interferogram_phase_flat"] = (pol_dir /f"interferogram_phase_flat_deg_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png")            
     
         
         #########################################################################
+        coh = single_baseline_single_pol_coh(primary,secondary * np.exp(1j * (corr_co - corr_pri)),(5,5))   
+        print(np.min(coh))
+        print(np.max(coh))
         
-        valid_slc = ( np.isfinite(primary) & np.isfinite(secondary) & (primary != 0) & (secondary != 0))
-        #coh = single_baseline_single_pol_coh(primary,secondary * np.exp(1j * (corr_co - corr_pri)),(5,5))   
-        
-        coh_abs, coh_phase = single_baseline_single_pol_coh( primary,secondary * np.exp(1j * (corr_co - corr_pri)), window=(5,5), valid_mask=valid_slc, min_valid_frac=0.8) 
-        coh_phase = np.rad2deg(coh_phase)
-        #coh_abs = np.abs(coh)
-        #coh_phase = np.angle(coh, deg=True)
-
-        vals_stats = coh_abs[np.isfinite(coh_abs)]
-
-        pol_plots[pol_out]["stats"] = {
-            "coh_mean":   float(np.mean(vals_stats)),
-            "coh_std":    float(np.std(vals_stats)),
-            "coh_min":    float(np.min(vals_stats)),
-            "coh_max":    float(np.max(vals_stats)),
-            "coh_median": float(np.median(vals_stats)),
-        }
+        coh_abs = np.abs(coh)
+        coh_phase = np.angle(coh, deg=True)
         
         
-        '''
+        # --- Mask to remove borders/spikes ---
+        mask = np.isfinite(coh_abs)
+        mask &= (coh_abs > 0.000001)        # remove null borders
+        mask &= (coh_abs < 0.9)     # remove saturated borders/spikes
+        
+        # Keep 2D maps for plotting
+        coh_abs_masked = coh_abs.copy()
+        coh_phase_masked = coh_phase.copy()
+    
+        # mask out unwanted pixels
+        coh_abs_masked[~mask] = np.nan
+        coh_phase_masked[~mask] = np.nan
+    
         pol_plots[pol]["stats"] = {
             "coh_mean":   float(np.nanmean(coh_abs)),
             "coh_std":    float(np.nanstd(coh_abs)),
             "coh_min":    float(np.nanmin(coh_abs)),
             "coh_max":    float(np.nanmax(coh_abs)),
             "coh_median": float(np.nanmedian(coh_abs)),}
-        '''
+        
         plot_2d_with_hist(
-            np.arange(coh_abs.shape[0]),
-            np.arange(coh_abs.shape[1]),
-            coh_abs,
+            np.arange(coh_abs_masked.shape[0]),
+            np.arange(coh_abs_masked.shape[1]),
+            coh_abs_masked,
             cb='Greys_r',
-            vmin=0.00001, vmax=0.99999,
+            vmin=0.001, vmax=1,
             title='|coh|',
             x_title='Azimuth [pixels]',
             y_title='Range [pixels]',
             cb_title='Amplitude',
             height_compression=0.01,   
-            file_2_save=pol_dir / f"coh_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png"
+            file_2_save=pol_dir / f"coh_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png"
         )
     
-        pol_plots[pol_out]["plots"]["coh_amp"] = (pol_dir /f"coh_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png") 
-        
-        
+        pol_plots[pol]["plots"]["coh_amp"] = (pol_dir /f"coh_amp_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png") 
+     
         plot_2d_with_hist(
-            np.arange(coh_phase.shape[0]),
-            np.arange(coh_phase.shape[1]),
-            coh_phase,
+            np.arange(coh_phase_masked.shape[0]),
+            np.arange(coh_phase_masked.shape[1]),
+            coh_phase_masked,
             cb='rainbow',
             vmin=-180, vmax=180,
             title='arg(coh) [deg]',
@@ -2324,10 +2103,10 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             y_title='Range [pixels]',
             cb_title='[deg]',
             height_compression=0.01,
-            file_2_save=pol_dir / f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png"
+            file_2_save=pol_dir / f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png"
         )
        
-        pol_plots[pol_out]["plots"]["coh_phase"] = (pol_dir /f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.png") 
+        pol_plots[pol]["plots"]["coh_phase"] = (pol_dir /f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.png") 
         
         
         print(np.mean(coh_abs), np.median(coh_abs))
@@ -2340,7 +2119,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             ref_tiff = data_primary_abs
         
             # --- Coherence amplitude ---
-            coh_abs_out = measurement_dir / f"coh_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.tif"
+            coh_abs_out = measurement_dir / f"coh_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.tif"
             save_tiff_with_gcps(
                 coh_abs_out,
                 coh_abs.astype(np.float32),
@@ -2348,7 +2127,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
             )
         
             # --- Coherence phase ---
-            coh_phase_out = measurement_dir / f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol_out}.tif"
+            coh_phase_out = measurement_dir / f"coh_phase_{date_primary}_{date_secondary}_{number_frame}_{flatten}_{pol}.tif"
             save_tiff_with_gcps(
                 coh_phase_out,
                 coh_phase.astype(np.float32),
@@ -2360,8 +2139,8 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
          # -------------------------------------------------------------------------
         print("[INFO] Saving clean PNG maps...")
      
-        coh_abs_png = pol_dir / f"coherence_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml_{pol_out}.png"
-        pol_plots[pol_out]["plots"]["coh_abs_png"] = (pol_dir /f"coherence_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml_{pol_out}.png")
+        coh_abs_png = pol_dir / f"coherence_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml_{pol}.png"
+        pol_plots[pol]["plots"]["coh_abs_png"] = (pol_dir /f"coherence_abs_{date_primary}_{date_secondary}_{number_frame}_{flatten}_kml_{pol}.png")
         save_clean_image(coh_abs, cmap='Greys_r', out_path=coh_abs_png, vmin=0, vmax=np.nanmax(coh_abs))
         make_white_transparent(coh_abs_png)
 
@@ -2376,6 +2155,7 @@ def check_interferogram(path_primary, path_secondary, flatten, is_light, number_
     global_info["coregistrationMethod_primary"] = coregistrationMethod_pri
     global_info["frame"] = int(number_frame)
     global_info["phaseCorrectionMode"] = flatten
+    global_info["phaseCorrectionApplied"] = phase_correction_applied
     global_info["date_primary"] = date_primary
     global_info["date_secondary"] = date_secondary
     
@@ -2767,9 +2547,8 @@ if __name__ == "__main__":
         "--pol",
         "--polarizations",
         dest="polarizations",
-        help="Comma-separated list of polarizations to process (e.g. VV or VV,HH, XP)"
+        help="Comma-separated list of polarizations to process (e.g. VV or VV,HH)"
     )
-    
 
     args = parser.parse_args()
 
