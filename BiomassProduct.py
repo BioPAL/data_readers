@@ -439,7 +439,7 @@ class BiomassProductSCS:
             print(f"Could not load root-level variables or global attributes: {e}")
     
         # === 2. Carica gruppi strutturati
-        groups = ["ionosphereCorrection","denoising", "geometry", "radiometry"]
+        groups = ["rfiMitigation", "ionosphereCorrection", "denoising", "geometry", "radiometry"]
     
         for group in groups:
             try:
@@ -464,7 +464,7 @@ class BiomassProductSCS:
         if not self.annotation_lut_file:
             raise FileNotFoundError("LUT NetCDF file not found.")
     
-        groups = ["ionosphereCorrection","denoising", "geometry", "radiometry"]
+        groups = ["rfiMitigation", "ionosphereCorrection", "denoising", "geometry", "radiometry"]
     
         var = None
         found_group = None
@@ -844,7 +844,7 @@ class BiomassProductDGM:
             print(f"Could not load root-level variables or global attributes: {e}")
     
         # === 2. Carica gruppi strutturati
-        groups = ["denoising", "geometry", "radiometry"]
+        groups = ["rfiMitigation", "ionosphereCorrection", "denoising", "geometry", "radiometry"]
     
         for group in groups:
             try:
@@ -867,7 +867,7 @@ class BiomassProductDGM:
             if not self.annotation_lut_file:
                 raise FileNotFoundError("LUT NetCDF file not found.")
         
-            groups = ["ionosphereCorrection","denoising", "geometry", "radiometry"]
+            groups = ["rfiMitigation", "ionosphereCorrection", "denoising", "geometry", "radiometry"]
         
             var = None
             found_group = None
@@ -1268,31 +1268,32 @@ class BiomassProductSTA:
 
         self.primaryImage   = _get_text(f"{coreg_base}/primaryImage")
         self.secondaryImage = _get_text(f"{coreg_base}/secondaryImage")
-        
+        self.polarisationUsed                = _get_text(f"{coreg_base}/polarisationUsed")
+        self.primaryImageSelectionInformation = _get_text(f"{coreg_base}/primaryImageSelectionInformation")
   
         
-        self.skpPhaseCalibrationFlag                = _get_bool(f"{coreg_base}/skpPhaseCalibrationFlag")
-        self.skpPhaseCorrectionFlag                 = _get_bool(f"{coreg_base}/skpPhaseCorrectionFlag")        
-        self.skpPhaseCorrectionFlatteningOnlyFlag   = _get_bool(f"{coreg_base}/skpPhaseCorrectionFlatteningOnlyFlag")
-        
+        sta_proc = "./staProcessingParameters"
 
-        self.normalBaseline                         = _get_float(f"{coreg_base}/normalBaseline")
-        self.averageRangeCoregistrationShift        = _get_float(f"{coreg_base}/averageRangeCoregistrationShift")
-        self.averageAzimuthCoregistrationShift      = _get_float(f"{coreg_base}/averageAzimuthCoregistrationShift")
-        
-        
-        sta_proc= "./staProcessingParameters"
-        self.coregistrationMethod    =  _get_text(f"{sta_proc}/coregistrationMethod")
-        
-        
+        self.multiSquintCalibrationFlag                         = _get_bool(f"{sta_proc}/multiSquintCalibrationFlag")
+        self.multiSquintCalibrationForceIonosphereCorrectionFlag = _get_bool(f"{sta_proc}/multiSquintCalibrationForceIonosphereCorrectionFlag")
+        self.multiSquintCalibrationDisableIonosphereCorrectionFlag = _get_bool(f"{sta_proc}/multiSquintCalibrationDisableIonosphereCorrectionFlag")
+        self.slowIonosphereRemovalFlag                          = _get_bool(f"{sta_proc}/slowIonosphereRemovalFlag")
+        self.azimuthSpectralFilteringFlag                       = _get_bool(f"{sta_proc}/azimuthSpectralFilteringFlag")
+        self.coregistrationMethod                               = _get_text(f"{sta_proc}/coregistrationMethod")
+        self.polarisationCombinationMethod                      = _get_text(f"{sta_proc}/polarisationCombinationMethod")
+
+        # SKP — spostati da staCoregistrationParameters a staProcessingParameters (PFD v1.6.1)
+        self.skpPhaseCalibrationFlag                = _get_bool(f"{sta_proc}/skpPhaseCalibrationFlag")
+        self.skpPhaseCorrectionFlag                 = _get_bool(f"{sta_proc}/skpPhaseCorrectionFlag")
+        self.skpPhaseCorrectionFlatteningOnlyFlag   = _get_bool(f"{sta_proc}/skpPhaseCorrectionFlatteningOnlyFlag")
 
         # -------------------------
         # RFI fields (needed for your added DB columns)
         # -------------------------
         proc_base = "./processingParameters"
 
-        self.rfiDetectionFlag        = _get_text(f"{proc_base}/rfiDetectionFlag")
-        self.rfiCorrectionFlag       = _get_text(f"{proc_base}/rfiCorrectionFlag")
+        self.rfiDetectionFlag        = _get_bool(f"{proc_base}/rfiDetectionFlag")
+        self.rfiCorrectionFlag       = _get_bool(f"{proc_base}/rfiCorrectionFlag")
         self.rfiMitigationMethod     = _get_text(f"{proc_base}/rfiMitigationMethod")
         self.rfiMask                 = _get_text(f"{proc_base}/rfiMask")
         self.rfiMaskGenerationMethod = _get_text(f"{proc_base}/rfiMaskGenerationMethod")
@@ -1523,9 +1524,11 @@ class BiomassProductSTA:
             "denoising",
             "geometry",
             "coregistration",
+            "interferometry",
+            "multiSquintCalibration",
             "skpPhaseCalibration",
-            "baselineAndIonosphereCorrection"
         ]
+    
     
         for group in groups:
             try:
@@ -1646,21 +1649,43 @@ class BiomassProductSTA:
                         "denoisingHH", "denoisingXX", "denoisingVV"
                         ],
         "geometry": [
-                    "latitude", "longitude", "height", "incidenceAngle", "elevationAngle", "terrainSlope"
+                    "latitude", "longitude", "height", "incidenceAngle", "elevationAngle",
+                    "rangeTerrainSlope", "azimuthTerrainSlope"
                     ],
         "coregistration": [
                     "azimuthCoregistrationShifts", "rangeCoregistrationShifts",
                     "coregistrationShiftsQuality", "flatteningPhaseScreen","waveNumbers"
                     ],
-    "skpPhaseCalibration": [
-        "skpCalibrationPhaseScreen", "skpCalibrationPhaseScreenQuality"
-    ],
-    "baselineAndIonosphereCorrection": [
-        "baselineErrorPhaseScreen",
-        "residualIonospherePhaseScreen",
-        "residualIonospherePhaseScreenQuality"
-    ]
-            }
+        # PFD v1.6.1: new groups replacing baselineAndIonosphereCorrection
+        "interferometry": [
+                    "coherence", "interferogram"
+                    ],
+        "multiSquintCalibration": [
+                    "ionospherePhaseScreens"
+                    ],
+        "skpPhaseCalibration": [
+                    "skpCalibrationPhaseScreen", "skpCalibrationPhaseScreenQuality"
+                    ],
+        "coregistration": [
+                    "azimuthCoregistrationShifts", "azimuthOrbitCoregistrationShifts",
+                    "rangeCoregistrationShifts", "rangeOrbitCoregistrationShifts",
+                    "coregistrationShiftsQuality", "flatteningPhaseScreen", "waveNumbers"
+                    ],
+        }
+ 
+        print("--- Checking LUT contents ---")
+        for group, variables in expected_groups.items():
+            try:
+                ds = xr.open_dataset(self.annotation_coregistered_lut_file, group=group)
+                for var in variables:
+                    if var in ds.variables:
+                        print(f"✔️ {group}/{var}")
+                    else:
+                        print(f"❌ MISSING: {group}/{var}")
+            except Exception as e:
+                for var in variables:
+                    print(f"❌ MISSING: {group}/{var} (group error: {e})")
+        print(' ')
 
         print("--- Checking LUT contents ---")
         for group, variables in expected_groups.items():
@@ -1691,8 +1716,9 @@ class BiomassProductSTA:
             "denoising",
             "geometry",
             "coregistration",
+            "interferometry",
+            "multiSquintCalibration",
             "skpPhaseCalibration",
-            "baselineAndIonosphereCorrection"
         ]
     
         var = None
@@ -3026,7 +3052,26 @@ class BiomassProductSTA_monitoring:
         self.normalBaseline = _get_float(f"{coreg_base}/normalBaseline")
         self.averageRangeCoregistrationShift   = _get_float(f"{coreg_base}/averageRangeCoregistrationShift")
         self.averageAzimuthCoregistrationShift = _get_float(f"{coreg_base}/averageAzimuthCoregistrationShift")
+        self.polarisationUsed                 = _get_text(f"{coreg_base}/polarisationUsed")
+        self.primaryImageSelectionInformation = _get_text(f"{coreg_base}/primaryImageSelectionInformation")
 
+        # -------------------------
+        # STA processing parameters (PFD v1.6.1)
+        # -------------------------
+        sta_proc = "./staProcessingParameters"
+
+        self.multiSquintCalibrationFlag                            = _get_bool(f"{sta_proc}/multiSquintCalibrationFlag")
+        self.multiSquintCalibrationForceIonosphereCorrectionFlag   = _get_bool(f"{sta_proc}/multiSquintCalibrationForceIonosphereCorrectionFlag")
+        self.multiSquintCalibrationDisableIonosphereCorrectionFlag = _get_bool(f"{sta_proc}/multiSquintCalibrationDisableIonosphereCorrectionFlag")
+        self.slowIonosphereRemovalFlag                             = _get_bool(f"{sta_proc}/slowIonosphereRemovalFlag")
+        self.azimuthSpectralFilteringFlag                          = _get_bool(f"{sta_proc}/azimuthSpectralFilteringFlag")
+        self.coregistrationMethod                                  = _get_text(f"{sta_proc}/coregistrationMethod")
+        self.polarisationCombinationMethod                         = _get_text(f"{sta_proc}/polarisationCombinationMethod")
+
+        # SKP flags under staProcessingParameters (PFD v1.6.1)
+        self.skpPhaseCalibrationFlag              = _get_bool(f"{sta_proc}/skpPhaseCalibrationFlag")
+        self.skpPhaseCorrectionFlag               = _get_bool(f"{sta_proc}/skpPhaseCorrectionFlag")
+        self.skpPhaseCorrectionFlatteningOnlyFlag = _get_bool(f"{sta_proc}/skpPhaseCorrectionFlatteningOnlyFlag")
         # -------------------------
         # RFI fields (needed for your added DB columns)
         # -------------------------
@@ -3368,8 +3413,9 @@ class BiomassProductSTA_monitoring:
             "denoising",
             "geometry",
             "coregistration",
+            "interferometry",
+            "multiSquintCalibration",
             "skpPhaseCalibration",
-            "baselineAndIonosphereCorrection"
         ]
     
         var = None
@@ -3447,12 +3493,7 @@ if __name__ == "__main__":
     product_STA.plot_lut_variable("skpCalibrationPhasesScreen", save_geotiff=True)
     product_STA.plot_lut_variable("flatteningPhasesScreen")
     product_STA.visualize_geotiff()
-    '''
-    
-    
-   
 
-    '''
     product_FH__L2A_path = r"E:\BIOMASS\03_SCRIPTS\example-notebooks\data\BIO_FP_FH__L2A_20170125T163833_20170206T163906_T_G03_M03_C___T000_F001_02_D6IOT7"
     product_FD__L2A_path = r"E:\BIOMASS\03_SCRIPTS\example-notebooks\data\BIO_FP_FD__L2A_20170125T163833_20170206T163906_T_G03_M03_C___T000_F001_02_D6IOR3"
     product_GN__L2A_path = r"E:\BIOMASS\03_SCRIPTS\example-notebooks\data\BIO_FP_GN__L2A_20170125T163833_20170206T163906_T_G03_M03_C___T000_F001_02_D6IOWK"
@@ -3488,7 +3529,7 @@ if __name__ == "__main__":
     product_fh_l2b.parse_l2b_specific()
     product_fd_l2b.parse_l2b_specific()
     product_gn_l2b.parse_l2b_specific()
-    '''
+
     
     product_SCS_path = r"E:\BIOMASS\02_DATA\20250522\BIO_S1_SCS__1S_20250525T095726_20250525T095919_C_G___M___C___T____F001_01_D9AIP8" 
     product_SCS= BiomassProductSCS(product_SCS_path)
@@ -3514,7 +3555,7 @@ if __name__ == "__main__":
     print(product_SCS.global_polarisationList)  
     print(product_SCS.global_orbitPass)       
 
-    '''
+
     product_SCS.load_complex_polarizations()
 
     hh_complex = product_SCS.S['HH']
@@ -3526,7 +3567,7 @@ if __name__ == "__main__":
     print (hv_phase)
     print (vv_amp)
     print(hh_complex)
-    '''    
+  
     #ratio = vv_amp / (product_SCS.A['HH'] + 1e-6)
     #product_SCS.save_raster(vv_amp, "E:\BIOMASS\VV_.tif")
     #rgb = product_SCS.generate_pauli_rgb()
@@ -3534,9 +3575,8 @@ if __name__ == "__main__":
     # Salva come GeoTIFF 3 bande
     #product_SCS.save_rgb(rgb, "E:/BIOMASS/pauli_rgb.tif")
     print(product_SCS.footprint_polygon)
-   
-    '''
-    product_DGM_path = r"E:\BIOMASS\02_DATA\V330\BIO_S1_DGM__1S_20170101T060309_20170101T060330_I_G03_M03_C03_T010_F001_01_D87CQE" 
+
+    #product_DGM_path = r"E:\BIOMASS\02_DATA\V330\BIO_S1_DGM__1S_20170101T060309_20170101T060330_I_G03_M03_C03_T010_F001_01_D87CQE" 
     product_DGM= BiomassProductDGM(product_DGM_path)
     print(product_DGM.denoising_denoisingHH)
     print(product_DGM.denoising_denoisingHV)
